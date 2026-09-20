@@ -16,11 +16,31 @@
 - **Completely redesigned theme** — light and dark modes (`prefers-color-scheme` + `data-theme`), new layout for sidebar / composer / messages, mobile-responsive. See `src/ollama_chat/static/app.css:1` (983 lines), screenshot above.
 - **Thinking mode toggle** — paw-icon button in the composer. Enables/disables `think` for `/api/chat`. State is persisted in `localStorage` (`ollama-chat-thinking`) and sent as `{"think": true|false}` via `startConversation` / `replyConversation` / `startTemplate` → `ChatManager(think=...)` → `ollama_chat(..., think=...)` (`src/ollama_chat/ollama.py:43`, `src/ollama_chat/chat.py:23`, `src/ollama_chat/app.py:320`). For reasoning models you can force thinking on or off; for other models leave it off. Visual active state is `icon-btn thinking-active` (`src/ollama_chat/static/app.css:777`, `src/ollama_chat/static/app.js:48`).
 - **File attachments for the model** — upload button in the composer (hidden `<input type="file">`). Supported types: `txt`, `md`, `docx`, `png`, `jpg`, `jpeg`. Text files are appended to the last `user` message, `docx` is parsed with `python-docx` (`pyproject.toml:34`), images are sent as base64 in `images` (`src/ollama_chat/chat.py:64`, `src/ollama_chat/static/app.js:111`). Selected file names are shown as a `file-pill`; you can send with files even when the text input is empty.
-- **One-click Windows launch — `start.bat`** — clone and run locally without manual venv setup. Creates `.venv`, installs the package in editable mode, and starts the server. All arguments are forwarded to `ollama-chat` (e.g. `start.bat -p 8080`).
+- **One-click Windows launch — `start.bat` / `install.bat`** — clone and run locally without manual venv setup. `install.bat:1` clones the repo into a clean folder and installs `.venv` + dependencies; `start.bat:1` creates `.venv` if needed and starts the server. All arguments are forwarded to `ollama-chat` (e.g. `start.bat -p 8080`).
 
-## Quick start (recommended — via `start.bat`)
+## Quick start
 
-Requirements: [Ollama](https://ollama.com/download) running + Python 3.11+ on `PATH`.
+Requirements: [Ollama](https://ollama.com/download) running + Python 3.11+ and Git on `PATH`.
+
+### Option A — via `install.bat` (clean folder, recommended for Windows)
+
+The easiest way for new users — just copy `install.bat` into an empty folder and run it:
+
+1. Create an empty folder and copy `install.bat` from this repository into it (or [download it](https://github.com/OlegUshakov-pl/ollama-chat/raw/main/install.bat)).
+2. Double-click `install.bat` (or run `install.bat` from a console).
+
+   `install.bat:1` will clone `https://github.com/OlegUshakov-pl/ollama-chat.git` into `.\ollama-chat` (if not already present), create `.venv`, upgrade `pip`, and run `pip install -e .` (includes `python-docx` for `.docx` support).
+
+3. Go to the cloned folder and start the server:
+
+   ```bat
+   cd ollama-chat
+   start.bat
+   ```
+
+   The app opens at http://127.0.0.1:8080/ , config file is `ollama-chat.json` in the user's home directory.
+
+### Option B — via `start.bat` (if you already cloned)
 
 ```bat
 git clone https://github.com/OlegUshakov-pl/ollama-chat.git
@@ -31,10 +51,10 @@ start.bat
 What `start.bat` does (`start.bat:1`):
 1. Creates `.venv` in the project root if missing (`python -m venv .venv`).
 2. Activates the environment and removes stale `~*` directories from `site-packages`.
-3. Installs dependencies and the package (`pip install -e .` — includes `python-docx` for `.docx` support).
-4. Runs `ollama-chat %*` — the app opens at http://127.0.0.1:8080/ , config file is `ollama-chat.json` in the user's home directory.
+3. Installs dependencies and the package (`pip install -e .`) if `.venv\Scripts\ollama-chat.exe` is not yet present (skips on re-run, works offline).
+4. Runs `ollama-chat %*` — all arguments are forwarded (e.g. `start.bat -p 8080 -h 127.0.0.1`).
 
-You can also double-click `start.bat` in File Explorer. Re-running it skips installation if `.venv\Scripts\ollama-chat.exe` already exists. Change port/host as usual: `start.bat -p 8080 -h 127.0.0.1`.
+You can also double-click `start.bat` in File Explorer.
 
 > If `OLLAMA_HOST` is not `http://127.0.0.1:11434`, set the environment variable before launching — see `src/ollama_chat/ollama.py:19`.
 
