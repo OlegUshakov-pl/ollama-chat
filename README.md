@@ -72,8 +72,7 @@ ollama-chat
 ollama-chat
 ~~~
 
-The app opens at http://127.0.0.1:8080/. The previous MarkdownUp-based interface is still
-available at http://127.0.0.1:8080/classic.html.
+The app opens at http://127.0.0.1:8080/.
 
 On Windows, you can also double-click `start.bat` (or run it from a console) to create the
 virtual environment, install the package, and start the server.

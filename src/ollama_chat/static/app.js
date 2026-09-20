@@ -21,7 +21,6 @@ const STRINGS = {
     themeToggle: 'Toggle theme',
     noConversations: 'No conversations yet.',
     loading: 'Loading…',
-    classicLink: 'Classic UI',
     chatMenu: 'Chat actions',
     menuRename: 'Rename',
     menuDownload: 'Download .md',
@@ -155,7 +154,7 @@ function renderMarkdown(markdownText) {
     return window.DOMPurify ? window.DOMPurify.sanitize(raw) : escapeHtml(raw);
 }
 
-/** File name for the .md export (same rules as the classic UI). */
+/** File name for the .md export (letters, digits and dashes, like before). */
 function buildMarkdownFilename(title) {
     let name = String(title || '').toLowerCase().replace(/['"]/g, '');
     name = name.replace(/[^a-z0-9]+/g, '-').replace(/^-/, '').replace(/-$/, '');
@@ -597,7 +596,6 @@ function render() {
         `</nav>` +
         `<p class="chat-list-title">${escapeHtml(STRINGS.chatsHeading)}</p>` +
         `<div class="chat-list" id="chat-list">${buildSidebarListHtml()}</div>` +
-        `<a class="nav-item" href="/classic.html">${escapeHtml(STRINGS.classicLink)}</a>` +
         `</aside>` +
         `<main class="main">` +
         `<header class="topbar">` +

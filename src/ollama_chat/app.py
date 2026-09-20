@@ -70,7 +70,6 @@ class OllamaChat(chisel.Application):
         self.add_static('index.html', urls=(('GET', None), ('GET', '/')))
         self.add_static('app.css')
         self.add_static('app.js')
-        self.add_static('classic.html')
         self.add_static('vendor/marked.min.js')
         self.add_static('vendor/purify.min.js')
         self.add_static('ollamaChat.bare')

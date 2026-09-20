@@ -35,7 +35,6 @@ class TestApp(unittest.TestCase):
                 [
                     'app.css',
                     'app.js',
-                    'classic.html',
                     'createTemplate',
                     'deleteConversation',
                     'deleteConversationExchange',
@@ -83,7 +82,6 @@ class TestApp(unittest.TestCase):
                 [
                     'app.css',
                     'app.js',
-                    'classic.html',
                     'createTemplate',
                     'deleteConversation',
                     'deleteConversationExchange',
