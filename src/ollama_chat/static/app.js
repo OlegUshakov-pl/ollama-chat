@@ -66,6 +66,7 @@ const ICONS = {
     check: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
     refresh: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></svg>',
     trash: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>',
+    download: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>',
 };
 
 /** Poll interval (ms) while a response is generating. */
@@ -186,6 +187,18 @@ async function downloadChat(id) {
     const data = await apiGet('getConversation', `id=${encodeURIComponent(id)}`);
     const conversation = data.conversation;
     downloadFile(buildMarkdownFilename(conversation.title), buildMarkdownExport(conversation));
+}
+
+async function downloadCurrentChat() {
+    if (state.route.name !== 'chat') {
+        return;
+    }
+    try {
+        await downloadChat(state.route.id);
+    } catch (err) {
+        state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
+        render();
+    }
 }
 
 function applyTheme(theme) {
@@ -487,6 +500,20 @@ function renderChatItem(conv) {
         `</div>`;
 }
 
+function buildChatHeaderHtml() {
+    if (state.route.name !== 'chat') {
+        return '';
+    }
+    const cur = state.current;
+    const conversation = cur && cur.conversation;
+    const title = conversation ? conversation.title : chatTitle(state.route.id);
+    const button = conversation
+        ? `<button type="button" class="action-btn" data-action="download-chat" ` +
+            `title="${escapeHtml(STRINGS.menuDownload)}" aria-label="${escapeHtml(STRINGS.menuDownload)}">${ICONS.download}</button>`
+        : '';
+    return `<div class="chat-header"><h1 class="chat-header-title">${escapeHtml(title)}</h1>${button}</div>`;
+}
+
 function buildModelMenuHtml() {
     if (!state.modelMenuOpen || !state.models) {
         return '';
@@ -578,6 +605,7 @@ function render() {
         `<span class="topbar-title">${escapeHtml(STRINGS.appTitle)}</span>` +
         `</header>` +
         (state.sidebarCollapsed ? `<button class="icon-btn sidebar-fab" id="btn-sidebar-fab" title="${escapeHtml(STRINGS.openSidebar)}" aria-label="${escapeHtml(STRINGS.openSidebar)}">${ICONS.panel}</button>` : '') +
+        buildChatHeaderHtml() +
         `<div class="messages"><div class="messages-inner" id="messages">${buildMessagesHtml()}</div></div>` +
         `<div class="composer-wrap"><div class="composer">${buildComposerHtml()}</div></div>` +
         `</main>` +
@@ -870,6 +898,8 @@ function onRootClick(event) {
             regenerateLastExchange();
         } else if (action === 'delete-exchange') {
             deleteLastExchange();
+        } else if (action === 'download-chat') {
+            downloadCurrentChat();
         } else if (action === 'thinking') {
             const ix = Number(actionButton.dataset.ix);
             const cur = state.current;

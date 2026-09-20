@@ -893,3 +893,24 @@ svg.icon-small {
     border-radius: 0;
     background: transparent;
 }
+
+/* Open chat header (step f) */
+
+.chat-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--panel-border);
+}
+
+.chat-header-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
