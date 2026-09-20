@@ -15,6 +15,8 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 call ".venv\Scripts\activate.bat"
+rem Drop pip leftovers from interrupted installs (they cause "Ignoring invalid distribution" warnings)
+for /d %%d in (".venv\Lib\site-packages\~*") do if exist "%%d" rd /s /q "%%d" 2>nul
 python -m pip install --quiet --upgrade pip
 if errorlevel 1 exit /b 1
 python -m pip install --quiet -e .
