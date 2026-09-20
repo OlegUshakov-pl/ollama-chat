@@ -1,4 +1,4 @@
-/* Ollama Chat - new frontend (step b: sidebar + routing).
+/* Ollama Chat - new frontend (step c: chat view + polling).
  * Plain JS, no framework, no CDN, works offline. Vendor globals:
  * window.marked (marked.umd) and window.DOMPurify (purify.min.js).
  */
@@ -12,6 +12,7 @@ const STRINGS = {
     composerPlaceholder: 'Send a message',
     errorBannerPrefix: 'Error: ',
     errorLoadConversations: 'Failed to load conversations.',
+    errorLoadConversation: 'Failed to load the chat.',
     errorLoadModels: 'Failed to load models.',
     sidebarToggle: 'Toggle sidebar',
     openSidebar: 'Open sidebar',
@@ -32,6 +33,10 @@ const STRINGS = {
     deleteConfirm: 'Delete this chat? This cannot be undone.',
     deleteButton: 'Delete',
     generating: 'Generating…',
+    thinkingNow: 'Thinking…',
+    thoughtDone: 'Thought',
+    retry: 'Retry',
+    backToChats: 'Back to chats',
 };
 
 /** Inline SVG icons (contour style, 20px, stroke 1.75, currentColor). */
@@ -43,6 +48,12 @@ const ICONS = {
     moon: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>',
 };
 
+/** Poll interval (ms) while a response is generating. */
+const POLL_MS = 400;
+
+/** Distance (px) from the bottom that still counts as "at the bottom" for autoscroll. */
+const SCROLL_STICK_PX = 80;
+
 const root = document.getElementById('app');
 
 const state = {
@@ -52,6 +63,8 @@ const state = {
     openMenuId: null,
     modal: null,
     sidebarCollapsed: false,
+    current: null,
+    pollTimer: null,
 };
 
 function parseRoute() {
@@ -154,6 +167,97 @@ function chatTitle(id) {
     return conv ? conv.title : id;
 }
 
+function messagesBox() {
+    return document.querySelector('.messages');
+}
+
+function scrollMessagesToBottom() {
+    const box = messagesBox();
+    if (box) {
+        box.scrollTop = box.scrollHeight;
+    }
+}
+
+function isNearBottom(box) {
+    return box.scrollHeight - box.scrollTop - box.clientHeight <= SCROLL_STICK_PX;
+}
+
+/** Re-render only the messages region (keeps focus, menu and modal intact during polling). */
+function patchMessages() {
+    const inner = document.getElementById('messages');
+    if (!inner) {
+        return;
+    }
+    const box = messagesBox();
+    const stick = box ? isNearBottom(box) : true;
+    inner.innerHTML = buildMessagesHtml();
+    if (stick) {
+        scrollMessagesToBottom();
+    }
+}
+
+/** Re-render only the sidebar list (skipped while a chat menu is open). */
+function patchSidebarList() {
+    if (state.openMenuId) {
+        return;
+    }
+    const list = document.getElementById('chat-list');
+    if (list) {
+        list.innerHTML = buildSidebarListHtml();
+    }
+}
+
+function renderExchange(exchange, isLast, generating) {
+    let html = `<div class="msg msg-user"><div class="bubble">${escapeHtml(exchange.user)}</div></div>`;
+    if (exchange.thinking) {
+        const open = generating && isLast ? ' open' : '';
+        const label = generating && isLast ? STRINGS.thinkingNow : STRINGS.thoughtDone;
+        html += `<details class="thinking"${open}><summary>${escapeHtml(label)}</summary>` +
+            `<div class="md">${renderMarkdown(exchange.thinking)}</div></details>`;
+    }
+    if (exchange.model) {
+        html += `<div class="msg msg-model"><div class="md">${renderMarkdown(exchange.model)}</div></div>`;
+    } else if (generating && isLast) {
+        html += `<div class="msg msg-model"><span class="typing" aria-label="${escapeHtml(STRINGS.generating)}">…</span></div>`;
+    }
+    return html;
+}
+
+function buildMessagesHtml() {
+    if (state.route.name === 'new') {
+        return (state.error ? `<div class="error-banner" role="alert">${escapeHtml(STRINGS.errorBannerPrefix)}${escapeHtml(state.error)}</div>` : '') +
+            `<p>${escapeHtml(STRINGS.greeting)}</p>`;
+    }
+    const cur = state.current;
+    let html = '';
+    if (state.error) {
+        html += `<div class="error-banner" role="alert">${escapeHtml(STRINGS.errorBannerPrefix)}${escapeHtml(state.error)}</div>`;
+    }
+    if (!cur || cur.loading) {
+        return `${html}<p>${escapeHtml(STRINGS.loading)}</p>`;
+    }
+    if (cur.error && !cur.conversation) {
+        return `${html}<div class="error-banner" role="alert">${escapeHtml(STRINGS.errorBannerPrefix)}${escapeHtml(cur.error)}</div>` +
+            `<p><a class="back-link" href="#/">${escapeHtml(STRINGS.backToChats)}</a> ` +
+            `<button type="button" class="btn" data-action="retry">${escapeHtml(STRINGS.retry)}</button></p>`;
+    }
+    if (cur.error) {
+        html += `<div class="error-banner" role="alert">${escapeHtml(STRINGS.errorBannerPrefix)}${escapeHtml(cur.error)}</div>`;
+    }
+    const exchanges = cur.conversation.exchanges || [];
+    exchanges.forEach((exchange, index) => {
+        html += renderExchange(exchange, index === exchanges.length - 1, cur.generating);
+    });
+    return html;
+}
+
+function buildSidebarListHtml() {
+    if (!state.conversations.length) {
+        return `<p class="chat-list-title">${escapeHtml(STRINGS.noConversations)}</p>`;
+    }
+    return state.conversations.map(renderChatItem).join('');
+}
+
 function renderChatItem(conv) {
     const active = state.route.name === 'chat' && state.route.id === conv.id ? ' active' : '';
     const menuOpen = state.openMenuId === conv.id ? ' menu-open' : '';
@@ -174,10 +278,10 @@ function renderChatItem(conv) {
 }
 
 function renderModal() {
-    if (!modalState()) {
+    if (!state.modal) {
         return '';
     }
-    const modal = modalState();
+    const modal = state.modal;
     if (modal.type === 'rename') {
         return `<div class="modal-overlay" id="modal-overlay">` +
             `<div class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(STRINGS.renameTitle)}">` +
@@ -201,10 +305,6 @@ function renderModal() {
         `</div></div></div>`;
 }
 
-function modalState() {
-    return state.modal;
-}
-
 function render() {
     const theme = currentTheme();
     if (state.route.name === 'chat') {
@@ -212,7 +312,6 @@ function render() {
     } else {
         document.title = STRINGS.appTitle;
     }
-    const chats = state.conversations.map(renderChatItem).join('');
 
     root.innerHTML =
         `<div class="layout${state.sidebarCollapsed ? ' sidebar-collapsed' : ''}" id="layout">` +
@@ -225,7 +324,7 @@ function render() {
         `<a class="nav-item${state.route.name === 'new' ? ' active' : ''}" href="#/">${ICONS.newChat}<span>${escapeHtml(STRINGS.navChat)}</span></a>` +
         `</nav>` +
         `<p class="chat-list-title">${escapeHtml(STRINGS.chatsHeading)}</p>` +
-        `<div class="chat-list" id="chat-list">${chats || `<p class="chat-list-title">${escapeHtml(STRINGS.noConversations)}</p>`}</div>` +
+        `<div class="chat-list" id="chat-list">${buildSidebarListHtml()}</div>` +
         `<a class="nav-item" href="/classic.html">${escapeHtml(STRINGS.classicLink)}</a>` +
         `</aside>` +
         `<main class="main">` +
@@ -234,12 +333,7 @@ function render() {
         `<span class="topbar-title">${escapeHtml(STRINGS.appTitle)}</span>` +
         `</header>` +
         (state.sidebarCollapsed ? `<button class="icon-btn sidebar-fab" id="btn-sidebar-fab" title="${escapeHtml(STRINGS.openSidebar)}" aria-label="${escapeHtml(STRINGS.openSidebar)}">${ICONS.panel}</button>` : '') +
-        `<div class="messages"><div class="messages-inner" id="messages">` +
-        (state.error ? `<div class="error-banner" role="alert">${escapeHtml(STRINGS.errorBannerPrefix)}${escapeHtml(state.error)}</div>` : '') +
-        (state.route.name === 'new'
-            ? `<p>${escapeHtml(STRINGS.greeting)}</p>`
-            : `<p>${escapeHtml(STRINGS.loading)}</p>`) +
-        `</div></div>` +
+        `<div class="messages"><div class="messages-inner" id="messages">${buildMessagesHtml()}</div></div>` +
         `<div class="composer-wrap"><div class="composer">` +
         `<textarea rows="1" placeholder="${escapeHtml(STRINGS.composerPlaceholder)}" aria-label="${escapeHtml(STRINGS.composerPlaceholder)}" disabled></textarea>` +
         `</div></div>` +
@@ -248,83 +342,79 @@ function render() {
         (state.openMenuId ? `<div class="overlay" id="menu-overlay"></div>` : '') +
         renderModal();
 
-    document.getElementById('btn-sidebar').addEventListener('click', () => {
-        state.sidebarCollapsed = true;
-        state.openMenuId = null;
-        render();
-    });
-    const fab = document.getElementById('btn-sidebar-fab');
-    if (fab) {
-        fab.addEventListener('click', () => {
-            state.sidebarCollapsed = false;
-            render();
-        });
-    }
-    document.getElementById('btn-sidebar-open').addEventListener('click', () => {
-        state.sidebarCollapsed = false;
-        document.getElementById('layout').classList.add('sidebar-open');
-    });
-    document.getElementById('btn-theme').addEventListener('click', () => {
-        const next = currentTheme() === 'dark' ? 'light' : 'dark';
-        try {
-            window.localStorage.setItem('ollama-chat-theme', next);
-        } catch (err) { /* ignore */ }
-        applyTheme(next);
-        render();
-    });
-    root.querySelectorAll('[data-action="menu"]').forEach((button) => {
-        button.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            state.openMenuId = state.openMenuId === button.dataset.id ? null : button.dataset.id;
-            render();
-        });
-    });
-    root.querySelectorAll('.chat-menu [data-action]').forEach((button) => {
-        button.addEventListener('click', () => {
-            handleMenuAction(button.dataset.action, button.dataset.id);
-        });
-    });
-    const menuOverlay = document.getElementById('menu-overlay');
-    if (menuOverlay) {
-        menuOverlay.addEventListener('click', () => {
-            state.openMenuId = null;
-            render();
-        });
-    }
-    const modalOverlay = document.getElementById('modal-overlay');
-    if (modalOverlay) {
-        modalOverlay.addEventListener('click', (event) => {
-            if (event.target === modalOverlay) {
-                state.modal = null;
-                render();
-            }
-        });
-    }
-    const modalCancel = root.querySelector('[data-action="modal-cancel"]');
-    if (modalCancel) {
-        modalCancel.addEventListener('click', () => {
-            state.modal = null;
-            render();
-        });
-    }
-    const modalSave = root.querySelector('[data-action="modal-save"]');
-    if (modalSave) {
-        modalSave.addEventListener('click', submitRename);
-    }
-    const modalConfirm = root.querySelector('[data-action="modal-confirm"]');
-    if (modalConfirm) {
-        modalConfirm.addEventListener('click', submitDelete);
-    }
     const modalInput = document.getElementById('modal-input');
     if (modalInput) {
         modalInput.focus();
         modalInput.select();
-        modalInput.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                submitRename();
-            }
-        });
+    }
+}
+
+function stopPolling() {
+    if (state.pollTimer) {
+        clearTimeout(state.pollTimer);
+        state.pollTimer = null;
+    }
+}
+
+function schedulePoll() {
+    stopPolling();
+    state.pollTimer = setTimeout(pollTick, POLL_MS);
+}
+
+async function loadConversation(id) {
+    stopPolling();
+    state.current = { id, loading: true, error: null, conversation: null, generating: false };
+    render();
+    scrollMessagesToBottom();
+    try {
+        const data = await apiGet('getConversation', `id=${encodeURIComponent(id)}`);
+        if (!state.current || state.current.id !== id) {
+            return;
+        }
+        state.current.loading = false;
+        state.current.conversation = data.conversation;
+        state.current.generating = Boolean(data.conversation.generating);
+        render();
+        scrollMessagesToBottom();
+        if (state.current.generating) {
+            schedulePoll();
+        }
+    } catch (err) {
+        if (!state.current || state.current.id !== id) {
+            return;
+        }
+        state.current.loading = false;
+        state.current.error = err.message;
+        render();
+    }
+}
+
+async function pollTick() {
+    state.pollTimer = null;
+    const cur = state.current;
+    if (!cur || state.route.name !== 'chat' || state.route.id !== cur.id) {
+        return;
+    }
+    try {
+        const data = await apiGet('getConversation', `id=${encodeURIComponent(cur.id)}`);
+        if (!state.current || state.current.id !== cur.id) {
+            return;
+        }
+        const wasGenerating = cur.generating;
+        cur.conversation = data.conversation;
+        cur.generating = Boolean(data.conversation.generating);
+        cur.error = null;
+        patchMessages();
+        patchSidebarList();
+        if (cur.generating) {
+            schedulePoll();
+        } else if (wasGenerating) {
+            await refreshConversations();
+        }
+    } catch (err) {
+        cur.error = err.message;
+        patchMessages();
+        schedulePoll();
     }
 }
 
@@ -392,11 +482,79 @@ async function refreshConversations() {
 }
 
 function onHashChange() {
+    stopPolling();
     state.route = parseRoute();
     state.openMenuId = null;
     state.modal = null;
+    state.current = null;
     document.getElementById('layout')?.classList.remove('sidebar-open');
     render();
+    if (state.route.name === 'chat') {
+        loadConversation(state.route.id);
+    }
+}
+
+/** Single delegated click handler (survives messages/sidebar patches during polling). */
+function onRootClick(event) {
+    const actionButton = event.target.closest ? event.target.closest('[data-action]') : null;
+    if (actionButton) {
+        const { action, id } = actionButton.dataset;
+        if (action === 'menu') {
+            event.preventDefault();
+            event.stopPropagation();
+            state.openMenuId = state.openMenuId === id ? null : id;
+            render();
+        } else if (action === 'rename' || action === 'delete' || action === 'download') {
+            handleMenuAction(action, id);
+        } else if (action === 'modal-cancel') {
+            state.modal = null;
+            render();
+        } else if (action === 'modal-save') {
+            submitRename();
+        } else if (action === 'modal-confirm') {
+            submitDelete();
+        } else if (action === 'retry' && state.route.name === 'chat') {
+            loadConversation(state.route.id);
+        }
+        return;
+    }
+    if (event.target.id === 'menu-overlay') {
+        state.openMenuId = null;
+        render();
+        return;
+    }
+    if (event.target.id === 'modal-overlay') {
+        state.modal = null;
+        render();
+        return;
+    }
+    const button = event.target.closest ? event.target.closest('#btn-sidebar,#btn-sidebar-open,#btn-sidebar-fab,#btn-theme') : null;
+    if (button) {
+        if (button.id === 'btn-sidebar') {
+            state.sidebarCollapsed = true;
+            state.openMenuId = null;
+            render();
+        } else if (button.id === 'btn-sidebar-open') {
+            state.sidebarCollapsed = false;
+            document.getElementById('layout').classList.add('sidebar-open');
+        } else if (button.id === 'btn-sidebar-fab') {
+            state.sidebarCollapsed = false;
+            render();
+        } else if (button.id === 'btn-theme') {
+            const next = currentTheme() === 'dark' ? 'light' : 'dark';
+            try {
+                window.localStorage.setItem('ollama-chat-theme', next);
+            } catch (err) { /* ignore */ }
+            applyTheme(next);
+            render();
+        }
+    }
+}
+
+function onRootKeyDown(event) {
+    if (event.key === 'Enter' && event.target && event.target.id === 'modal-input') {
+        submitRename();
+    }
 }
 
 function onKeyDown(event) {
@@ -421,8 +579,13 @@ function init() {
     }
     window.addEventListener('hashchange', onHashChange);
     window.addEventListener('keydown', onKeyDown);
+    root.addEventListener('click', onRootClick);
+    root.addEventListener('keydown', onRootKeyDown);
     render();
     refreshConversations();
+    if (state.route.name === 'chat') {
+        loadConversation(state.route.id);
+    }
 }
 
 init();
