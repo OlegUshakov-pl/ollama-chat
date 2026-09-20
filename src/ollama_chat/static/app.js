@@ -598,7 +598,7 @@ function buildComposerHtml() {
         `title="${escapeHtml(thinkingTitle)}" aria-label="${escapeHtml(thinkingTitle)}">${thinkingIcon}</button>` +
         `<button type="button" class="icon-btn${uploadFiles.length ? ' upload-active' : ''}" id="upload-btn" data-action="uploadFile" ` +
         `title="${escapeHtml(uploadFiles.length ? uploadFiles.length + ' file(s) selected' : STRINGS.uploadFile)}" aria-label="${escapeHtml(STRINGS.uploadFile)}">${ICONS.upload}</button>` +
-        (uploadFiles.length ? `<span style="font-size:12px;color:var(--text-secondary);margin-right:4px">${uploadFiles.length}</span>` : '') +
+        (uploadFiles.length ? `<span style="font-size:12px;color:var(--text-secondary);margin-right:4px">${escapeHtml(uploadFiles.map(f => f.name).join(', '))}</span>` : '') +
         `<input type="file" id="file-input" accept=".txt,.md,.docx,.png,.jpg,.jpeg" multiple style="display:none">` +
         `<button type="button" class="send-btn${canSend ? ' ready' : ''}" id="send-btn" data-action="send" ` +
         `title="${escapeHtml(sendLabel)}" aria-label="${escapeHtml(sendLabel)}"${canSend || generating ? '' : ' disabled'}>${sendIcon}</button>` +
