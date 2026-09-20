@@ -1084,13 +1084,15 @@ async function init() {
     root.addEventListener('input', onRootInput);
     root.addEventListener('focusin', onRootFocus);
     root.addEventListener('focusout', onRootBlur);
-    document.getElementById('file-input')?.addEventListener('change', (event) => {
-        const files = event.target.files;
-        if (files) {
-            uploadFiles = Array.from(files).filter((f) => {
-                const ext = f.name.split('.').pop().toLowerCase();
-                return ['txt', 'md', 'docx', 'png', 'jpg', 'jpeg'].includes(ext);
-            });
+    root.addEventListener('change', (event) => {
+        if (event.target.id === 'file-input') {
+            const files = event.target.files;
+            if (files) {
+                uploadFiles = Array.from(files).filter((f) => {
+                    const ext = f.name.split('.').pop().toLowerCase();
+                    return ['txt', 'md', 'docx', 'png', 'jpg', 'jpeg'].includes(ext);
+                });
+            }
         }
     });
     render();
