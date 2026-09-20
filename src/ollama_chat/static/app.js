@@ -1,4 +1,4 @@
-/* Ollama Chat - new frontend (step c: chat view + polling).
+/* Ollama Chat - new frontend (step d: composer + model picker).
  * Plain JS, no framework, no CDN, works offline. Vendor globals:
  * window.marked (marked.umd) and window.DOMPurify (purify.min.js).
  */
@@ -14,6 +14,8 @@ const STRINGS = {
     errorLoadConversations: 'Failed to load conversations.',
     errorLoadConversation: 'Failed to load the chat.',
     errorLoadModels: 'Failed to load models.',
+    errorNoModel: 'No model selected. Download a model first.',
+    errorSend: 'Failed to send the message.',
     sidebarToggle: 'Toggle sidebar',
     openSidebar: 'Open sidebar',
     themeToggle: 'Toggle theme',
@@ -37,6 +39,11 @@ const STRINGS = {
     thoughtDone: 'Thought',
     retry: 'Retry',
     backToChats: 'Back to chats',
+    sendLabel: 'Send',
+    stopLabel: 'Stop',
+    modelLabel: 'Model',
+    selectModel: 'Select model',
+    noModels: 'No models',
 };
 
 /** Inline SVG icons (contour style, 20px, stroke 1.75, currentColor). */
@@ -46,6 +53,9 @@ const ICONS = {
     dots: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>',
     sun: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
     moon: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>',
+    up: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>',
+    stop: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>',
+    chevron: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
 };
 
 /** Poll interval (ms) while a response is generating. */
@@ -65,6 +75,12 @@ const state = {
     sidebarCollapsed: false,
     current: null,
     pollTimer: null,
+    models: null,
+    selectedModel: null,
+    modelMenuOpen: false,
+    drafts: {},
+    composerFocus: false,
+    sending: false,
 };
 
 function parseRoute() {
@@ -74,6 +90,18 @@ function parseRoute() {
         return { name: 'chat', id: match[1] };
     }
     return { name: 'new' };
+}
+
+function draftKey() {
+    return state.route.name === 'chat' ? `c:${state.route.id}` : 'new';
+}
+
+function getDraft() {
+    return state.drafts[draftKey()] || '';
+}
+
+function setDraft(text) {
+    state.drafts[draftKey()] = text;
 }
 
 async function apiGet(action, query) {
@@ -165,6 +193,18 @@ function currentTheme() {
 function chatTitle(id) {
     const conv = state.conversations.find((item) => item.id === id);
     return conv ? conv.title : id;
+}
+
+/** Model shown in the composer: the open chat's model (read-only) or the selected model. */
+function composerModel() {
+    if (state.route.name === 'chat' && state.current && state.current.conversation) {
+        return state.current.conversation.model;
+    }
+    return state.selectedModel;
+}
+
+function isGenerating() {
+    return Boolean(state.current && state.current.generating && state.route.name === 'chat');
 }
 
 function messagesBox() {
@@ -277,6 +317,41 @@ function renderChatItem(conv) {
         `</div>`;
 }
 
+function buildModelMenuHtml() {
+    if (!state.modelMenuOpen || !state.models) {
+        return '';
+    }
+    const options = state.models.list.map((model) => {
+        const selected = model.id === composerModel() ? ' aria-current="true"' : '';
+        return `<button type="button" role="menuitemradio"${selected} data-action="model" data-id="${escapeHtml(model.id)}" ` +
+            `title="${escapeHtml(model.id)}">${escapeHtml(model.id)}</button>`;
+    }).join('');
+    return `<div class="model-menu" role="menu">${options || `<p class="chat-list-title">${escapeHtml(STRINGS.noModels)}</p>`}</div>`;
+}
+
+function buildComposerHtml() {
+    const draft = getDraft();
+    const generating = isGenerating();
+    const model = composerModel();
+    const readOnly = state.route.name === 'chat';
+    const canSend = draft.trim() !== '' && !state.sending && !generating;
+    const sendLabel = generating ? STRINGS.stopLabel : STRINGS.sendLabel;
+    const sendIcon = generating ? ICONS.stop : ICONS.up;
+    return `<textarea id="composer-input" rows="1" placeholder="${escapeHtml(STRINGS.composerPlaceholder)}" ` +
+        `aria-label="${escapeHtml(STRINGS.composerPlaceholder)}">${escapeHtml(draft)}</textarea>` +
+        `<div class="composer-row">` +
+        `<div class="model-picker">` +
+        (readOnly
+            ? `<span class="model-pill" title="${escapeHtml(model || '')}"><span class="model-name">${escapeHtml(model || STRINGS.noModels)}</span></span>`
+            : `<button type="button" class="model-pill" id="model-pill" aria-haspopup="menu" aria-expanded="${state.modelMenuOpen}" ` +
+                `title="${escapeHtml(STRINGS.selectModel)}"><span class="model-name">${escapeHtml(model || STRINGS.noModels)}</span>${ICONS.chevron}</button>`) +
+        buildModelMenuHtml() +
+        `</div>` +
+        `<button type="button" class="send-btn${canSend ? ' ready' : ''}" id="send-btn" data-action="send" ` +
+        `title="${escapeHtml(sendLabel)}" aria-label="${escapeHtml(sendLabel)}"${canSend || generating ? '' : ' disabled'}>${sendIcon}</button>` +
+        `</div>`;
+}
+
 function renderModal() {
     if (!state.modal) {
         return '';
@@ -334,18 +409,46 @@ function render() {
         `</header>` +
         (state.sidebarCollapsed ? `<button class="icon-btn sidebar-fab" id="btn-sidebar-fab" title="${escapeHtml(STRINGS.openSidebar)}" aria-label="${escapeHtml(STRINGS.openSidebar)}">${ICONS.panel}</button>` : '') +
         `<div class="messages"><div class="messages-inner" id="messages">${buildMessagesHtml()}</div></div>` +
-        `<div class="composer-wrap"><div class="composer">` +
-        `<textarea rows="1" placeholder="${escapeHtml(STRINGS.composerPlaceholder)}" aria-label="${escapeHtml(STRINGS.composerPlaceholder)}" disabled></textarea>` +
-        `</div></div>` +
+        `<div class="composer-wrap"><div class="composer">${buildComposerHtml()}</div></div>` +
         `</main>` +
         `</div>` +
-        (state.openMenuId ? `<div class="overlay" id="menu-overlay"></div>` : '') +
+        (state.openMenuId || state.modelMenuOpen ? `<div class="overlay" id="menu-overlay"></div>` : '') +
         renderModal();
 
+    autoresizeComposer();
     const modalInput = document.getElementById('modal-input');
     if (modalInput) {
         modalInput.focus();
         modalInput.select();
+    } else if (state.composerFocus) {
+        const composer = document.getElementById('composer-input');
+        if (composer) {
+            composer.focus();
+            composer.setSelectionRange(composer.value.length, composer.value.length);
+        }
+    }
+}
+
+function autoresizeComposer() {
+    const composer = document.getElementById('composer-input');
+    if (composer) {
+        composer.style.height = 'auto';
+        composer.style.height = `${composer.scrollHeight}px`;
+    }
+}
+
+/** Update the send button in place while typing (no re-render, keeps focus). */
+function updateSendButton() {
+    const button = document.getElementById('send-btn');
+    if (!button || isGenerating()) {
+        return;
+    }
+    const ready = getDraft().trim() !== '' && !state.sending;
+    button.classList.toggle('ready', ready);
+    if (ready) {
+        button.removeAttribute('disabled');
+    } else {
+        button.setAttribute('disabled', '');
     }
 }
 
@@ -418,6 +521,68 @@ async function pollTick() {
     }
 }
 
+async function loadModels() {
+    const data = await apiGet('getModels');
+    state.models = { current: data.model || null, list: data.models || [] };
+    if (!state.selectedModel) {
+        state.selectedModel = state.models.current || (state.models.list.length ? state.models.list[0].id : null);
+    }
+}
+
+async function submitComposer() {
+    if (state.sending) {
+        return;
+    }
+    if (isGenerating() && state.route.name === 'chat') {
+        await stopCurrentChat();
+        return;
+    }
+    const text = getDraft().trim();
+    if (!text) {
+        return;
+    }
+    state.sending = true;
+    state.error = null;
+    render();
+    try {
+        if (state.route.name === 'new') {
+            const model = composerModel();
+            if (!model) {
+                throw new Error(STRINGS.errorNoModel);
+            }
+            const data = await apiPost('startConversation', { model, user: text });
+            setDraft('');
+            state.sending = false;
+            window.location.hash = `#/c/${data.id}`;
+            await refreshConversations();
+        } else {
+            await apiPost('replyConversation', { id: state.route.id, user: text });
+            setDraft('');
+            state.sending = false;
+            state.composerFocus = true;
+            await loadConversation(state.route.id);
+        }
+    } catch (err) {
+        state.sending = false;
+        state.error = `${STRINGS.errorSend} ${err.message}`;
+        state.composerFocus = state.route.name !== 'new';
+        render();
+    }
+}
+
+async function stopCurrentChat() {
+    if (state.route.name !== 'chat') {
+        return;
+    }
+    try {
+        await apiPost('stopConversation', { id: state.route.id });
+        await loadConversation(state.route.id);
+    } catch (err) {
+        state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
+        render();
+    }
+}
+
 async function handleMenuAction(action, id) {
     if (action === 'rename') {
         state.openMenuId = null;
@@ -436,6 +601,10 @@ async function handleMenuAction(action, id) {
             state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
             render();
         }
+    } else if (action === 'model') {
+        state.selectedModel = id;
+        state.modelMenuOpen = false;
+        render();
     }
 }
 
@@ -474,6 +643,9 @@ async function refreshConversations() {
     try {
         const data = await apiGet('getConversations');
         state.conversations = data.conversations || [];
+        if (!state.selectedModel && data.model) {
+            state.selectedModel = data.model;
+        }
         state.error = null;
     } catch (err) {
         state.error = `${STRINGS.errorLoadConversations} ${err.message}`;
@@ -486,7 +658,9 @@ function onHashChange() {
     state.route = parseRoute();
     state.openMenuId = null;
     state.modal = null;
+    state.modelMenuOpen = false;
     state.current = null;
+    state.sending = false;
     document.getElementById('layout')?.classList.remove('sidebar-open');
     render();
     if (state.route.name === 'chat') {
@@ -504,7 +678,7 @@ function onRootClick(event) {
             event.stopPropagation();
             state.openMenuId = state.openMenuId === id ? null : id;
             render();
-        } else if (action === 'rename' || action === 'delete' || action === 'download') {
+        } else if (action === 'rename' || action === 'delete' || action === 'download' || action === 'model') {
             handleMenuAction(action, id);
         } else if (action === 'modal-cancel') {
             state.modal = null;
@@ -515,11 +689,14 @@ function onRootClick(event) {
             submitDelete();
         } else if (action === 'retry' && state.route.name === 'chat') {
             loadConversation(state.route.id);
+        } else if (action === 'send') {
+            submitComposer();
         }
         return;
     }
     if (event.target.id === 'menu-overlay') {
         state.openMenuId = null;
+        state.modelMenuOpen = false;
         render();
         return;
     }
@@ -528,7 +705,7 @@ function onRootClick(event) {
         render();
         return;
     }
-    const button = event.target.closest ? event.target.closest('#btn-sidebar,#btn-sidebar-open,#btn-sidebar-fab,#btn-theme') : null;
+    const button = event.target.closest ? event.target.closest('#btn-sidebar,#btn-sidebar-open,#btn-sidebar-fab,#btn-theme,#model-pill') : null;
     if (button) {
         if (button.id === 'btn-sidebar') {
             state.sidebarCollapsed = true;
@@ -547,13 +724,54 @@ function onRootClick(event) {
             } catch (err) { /* ignore */ }
             applyTheme(next);
             render();
+        } else if (button.id === 'model-pill') {
+            toggleModelMenu();
         }
+    }
+}
+
+async function toggleModelMenu() {
+    if (state.modelMenuOpen) {
+        state.modelMenuOpen = false;
+        render();
+        return;
+    }
+    try {
+        await loadModels();
+        state.modelMenuOpen = true;
+        render();
+    } catch (err) {
+        state.error = `${STRINGS.errorLoadModels} ${err.message}`;
+        render();
     }
 }
 
 function onRootKeyDown(event) {
     if (event.key === 'Enter' && event.target && event.target.id === 'modal-input') {
         submitRename();
+    } else if (event.key === 'Enter' && event.target && event.target.id === 'composer-input' && !event.shiftKey) {
+        event.preventDefault();
+        submitComposer();
+    }
+}
+
+function onRootInput(event) {
+    if (event.target && event.target.id === 'composer-input') {
+        setDraft(event.target.value);
+        autoresizeComposer();
+        updateSendButton();
+    }
+}
+
+function onRootFocus(event) {
+    if (event.target && event.target.id === 'composer-input') {
+        state.composerFocus = true;
+    }
+}
+
+function onRootBlur(event) {
+    if (event.target && event.target.id === 'composer-input') {
+        state.composerFocus = false;
     }
 }
 
@@ -562,14 +780,15 @@ function onKeyDown(event) {
         if (state.modal) {
             state.modal = null;
             render();
-        } else if (state.openMenuId) {
+        } else if (state.openMenuId || state.modelMenuOpen) {
             state.openMenuId = null;
+            state.modelMenuOpen = false;
             render();
         }
     }
 }
 
-function init() {
+async function init() {
     let saved = null;
     try {
         saved = window.localStorage.getItem('ollama-chat-theme');
@@ -581,10 +800,20 @@ function init() {
     window.addEventListener('keydown', onKeyDown);
     root.addEventListener('click', onRootClick);
     root.addEventListener('keydown', onRootKeyDown);
+    root.addEventListener('input', onRootInput);
+    root.addEventListener('focusin', onRootFocus);
+    root.addEventListener('focusout', onRootBlur);
     render();
-    refreshConversations();
+    try {
+        await loadModels();
+    } catch (err) {
+        state.error = `${STRINGS.errorLoadModels} ${err.message}`;
+    }
+    await refreshConversations();
     if (state.route.name === 'chat') {
         loadConversation(state.route.id);
+    } else {
+        render();
     }
 }
 
