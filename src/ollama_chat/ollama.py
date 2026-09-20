@@ -43,7 +43,7 @@ def _iter_ndjson(response):
 
 
 # Call the Ollama chat API and yield each streamed JSON response chunk
-def ollama_chat(pool_manager, model, messages):
+def ollama_chat(pool_manager, model, messages, think=None):
     # Is this a thinking model?
     url_show = _get_ollama_url('/api/show')
     data_show = {'model': model}
@@ -54,7 +54,7 @@ def ollama_chat(pool_manager, model, messages):
         model_show = response_show.json()
     finally:
         response_show.close()
-    is_thinking = 'capabilities' in model_show and 'thinking' in model_show['capabilities']
+    is_thinking = think if think is not None else ('capabilities' in model_show and 'thinking' in model_show['capabilities'])
 
     # Start a streaming chat request
     url_chat = _get_ollama_url('/api/chat')

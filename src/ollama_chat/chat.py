@@ -23,14 +23,16 @@ from .ollama import ollama_chat
 
 # The ollama chat manager class
 class ChatManager():
-    __slots__ = ('app', 'conversation_id', 'prompts', 'stop')
+    __slots__ = ('app', 'conversation_id', 'prompts', 'stop', 'think', 'files')
 
 
-    def __init__(self, app, conversation_id, prompts):
+    def __init__(self, app, conversation_id, prompts, think=False, files=None):
         self.app = app
         self.conversation_id = conversation_id
         self.prompts = list(prompts)
         self.stop = False
+        self.think = think
+        self.files = files or []
 
         # Start the chat thread
         chat_thread = threading.Thread(target=self.chat_thread_fn, args=(self,))
@@ -61,6 +63,36 @@ class ChatManager():
                             messages.append({'role': 'user', 'content': user_content, 'images': flags.get('images')})
                             if exchange['model'] != '':
                                 messages.append({'role': 'assistant', 'content': exchange['model']})
+
+                    # Attach files to the last user message
+                    if chat.files:
+                        for file_item in chat.files:
+                            file_name = file_item['name']
+                            file_type = file_item.get('type', '')
+                            file_data = file_item.get('data', '')
+                            ext = os.path.splitext(file_name)[1].lower()
+                            if ext in ('.png', '.jpg', '.jpeg'):
+                                if 'images' not in flags:
+                                    flags['images'] = []
+                                flags['images'].append(file_data)
+                                if messages and messages[-1].get('role') == 'user':
+                                    messages[-1]['images'] = flags.get('images')
+                            else:
+                                try:
+                                    if ext == '.docx':
+                                        import base64 as _base64
+                                        from docx import Document
+                                        from io import BytesIO as _BytesIO
+                                        doc = Document(_BytesIO(_base64.b64decode(file_data)))
+                                        file_text = '\n'.join(p.text for p in doc.paragraphs)
+                                    else:
+                                        file_text = file_data
+                                    if messages and messages[-1].get('role') == 'user':
+                                        messages[-1]['content'] += '\n\n' + file_text
+                                except Exception as exc:
+                                    if messages and messages[-1].get('role') == 'user':
+                                        messages[-1]['content'] += f'\n\n**Error reading {file_name}:** {exc}'
+                        chat.files = []
 
                     # Help command?
                     if 'help' in flags:
@@ -101,7 +133,7 @@ class ChatManager():
                         continue
 
                 # Stream the chat response
-                for chunk in ollama_chat(chat.app.pool_manager, model, messages):
+                for chunk in ollama_chat(chat.app.pool_manager, model, messages, think=chat.think):
                     if chat.stop:
                         break
 

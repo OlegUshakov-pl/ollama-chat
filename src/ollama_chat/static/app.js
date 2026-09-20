@@ -48,6 +48,9 @@ const STRINGS = {
     regenerateLabel: 'Regenerate',
     deleteResponseLabel: 'Delete response',
     codeLabel: 'code',
+    thinkingOn: 'Thinking on',
+    thinkingOff: 'Thinking off',
+    uploadFile: 'Upload file',
 };
 
 /** Inline SVG icons (contour style, 20px, stroke 1.75, currentColor). */
@@ -66,6 +69,9 @@ const ICONS = {
     refresh: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></svg>',
     trash: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>',
     download: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>',
+    paw: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="10" r="5"/><path d="M8 21v-1a4 4 0 0 1 4-4 4 4 0 0 1 4 4v1"/><path d="M16 7.5V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2.5"/><path d="M4 11.5V9a6 6 0 0 1 6-6h0a6 6 0 0 1 6 6v2.5"/></svg>',
+    pawOff: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="10" r="5"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="4" y1="7" x2="20" y2="23"/><path d="M16 7.5V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2.5"/></svg>',
+    upload: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
 };
 
 /** Poll interval (ms) while a response is generating. */
@@ -75,6 +81,8 @@ const POLL_MS = 400;
 const SCROLL_STICK_PX = 80;
 
 const root = document.getElementById('app');
+
+let uploadFiles = [];
 
 const state = {
     route: parseRoute(),
@@ -92,7 +100,48 @@ const state = {
     composerFocus: false,
     sending: false,
     thinkingOpen: {},
+    thinkingEnabled: loadThinkingEnabled(),
+    uploading: false,
 };
+
+function loadThinkingEnabled() {
+    try {
+        return window.localStorage.getItem('ollama-chat-thinking') === 'true';
+    } catch (err) { return true; }
+}
+
+function saveThinkingEnabled(val) {
+    try { window.localStorage.setItem('ollama-chat-thinking', String(val)); } catch (err) { /* ignore */ }
+}
+
+function readFilesAsData(files) {
+    const results = [];
+    for (const file of files) {
+        const ext = file.name.split('.').pop().toLowerCase();
+        const allowed = ['txt', 'md', 'docx', 'png', 'jpg', 'jpeg'];
+        if (!allowed.includes(ext)) continue;
+        results.push(new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                let data;
+                if (['png', 'jpg', 'jpeg'].includes(ext)) {
+                    const base64 = reader.result.split(',')[1] || reader.result;
+                    data = base64;
+                } else {
+                    data = reader.result;
+                }
+                resolve({ name: file.name, type: file.type || `application/${ext === 'docx' ? 'vnd.openxmlformats-officedocument.wordprocessingml.document' : ext === 'md' ? 'markdown' : ext === 'txt' ? 'plaintext' : ext === 'png' ? 'png' : 'jpeg'}`, data });
+            };
+            reader.onerror = () => resolve(null);
+            if (['png', 'jpg', 'jpeg'].includes(ext)) {
+                reader.readAsDataURL(file);
+            } else {
+                reader.readAsText(file);
+            }
+        }));
+    }
+    return Promise.all(results).then((items) => items.filter(Boolean));
+}
 
 function parseRoute() {
     const hash = window.location.hash || '#/';
@@ -530,9 +579,11 @@ function buildComposerHtml() {
     const generating = isGenerating();
     const model = composerModel();
     const readOnly = state.route.name === 'chat';
-    const canSend = draft.trim() !== '' && !state.sending && !generating;
+    const canSend = (draft.trim() !== '' || uploadFiles.length > 0) && !state.sending && !generating;
     const sendLabel = generating ? STRINGS.stopLabel : STRINGS.sendLabel;
     const sendIcon = generating ? ICONS.stop : ICONS.up;
+    const thinkingIcon = state.thinkingEnabled ? ICONS.paw : ICONS.pawOff;
+    const thinkingTitle = state.thinkingEnabled ? STRINGS.thinkingOn : STRINGS.thinkingOff;
     return `<textarea id="composer-input" rows="1" placeholder="${escapeHtml(STRINGS.composerPlaceholder)}" ` +
         `aria-label="${escapeHtml(STRINGS.composerPlaceholder)}">${escapeHtml(draft)}</textarea>` +
         `<div class="composer-row">` +
@@ -543,6 +594,12 @@ function buildComposerHtml() {
                 `title="${escapeHtml(STRINGS.selectModel)}"><span class="model-name">${escapeHtml(model || STRINGS.noModels)}</span>${ICONS.chevron}</button>`) +
         buildModelMenuHtml() +
         `</div>` +
+        `<button type="button" class="icon-btn${state.thinkingEnabled ? ' thinking-active' : ''}" id="thinking-btn" data-action="toggleThinking" ` +
+        `title="${escapeHtml(thinkingTitle)}" aria-label="${escapeHtml(thinkingTitle)}">${thinkingIcon}</button>` +
+        `<button type="button" class="icon-btn${uploadFiles.length ? ' upload-active' : ''}" id="upload-btn" data-action="uploadFile" ` +
+        `title="${escapeHtml(uploadFiles.length ? uploadFiles.length + ' file(s) selected' : STRINGS.uploadFile)}" aria-label="${escapeHtml(STRINGS.uploadFile)}">${ICONS.upload}</button>` +
+        (uploadFiles.length ? `<span style="font-size:12px;color:var(--text-secondary);margin-right:4px">${uploadFiles.length}</span>` : '') +
+        `<input type="file" id="file-input" accept=".txt,.md,.docx,.png,.jpg,.jpeg" multiple style="display:none">` +
         `<button type="button" class="send-btn${canSend ? ' ready' : ''}" id="send-btn" data-action="send" ` +
         `title="${escapeHtml(sendLabel)}" aria-label="${escapeHtml(sendLabel)}"${canSend || generating ? '' : ' disabled'}>${sendIcon}</button>` +
         `</div>`;
@@ -640,7 +697,7 @@ function updateSendButton() {
     if (!button || isGenerating()) {
         return;
     }
-    const ready = getDraft().trim() !== '' && !state.sending;
+    const ready = (getDraft().trim() !== '' || uploadFiles.length > 0) && !state.sending;
     button.classList.toggle('ready', ready);
     if (ready) {
         button.removeAttribute('disabled');
@@ -736,7 +793,7 @@ async function submitComposer() {
         return;
     }
     const text = getDraft().trim();
-    if (!text) {
+    if (!text && !uploadFiles.length) {
         return;
     }
     state.sending = true;
@@ -748,14 +805,18 @@ async function submitComposer() {
             if (!model) {
                 throw new Error(STRINGS.errorNoModel);
             }
-            const data = await apiPost('startConversation', { model, user: text });
+            const files = await readFilesAsData(uploadFiles);
+            const data = await apiPost('startConversation', { model, user: text, think: state.thinkingEnabled, files });
             setDraft('');
+            uploadFiles = [];
             state.sending = false;
             window.location.hash = `#/c/${data.id}`;
             await refreshConversations();
         } else {
-            await apiPost('replyConversation', { id: state.route.id, user: text });
+            const files = await readFilesAsData(uploadFiles);
+            await apiPost('replyConversation', { id: state.route.id, user: text, think: state.thinkingEnabled, files });
             setDraft('');
+            uploadFiles = [];
             state.sending = false;
             state.composerFocus = true;
             await loadConversation(state.route.id);
@@ -905,6 +966,12 @@ function onRootClick(event) {
             const shown = isThinkingOpen(ix, ix === lastIx, Boolean(cur && cur.generating));
             state.thinkingOpen[ix] = !shown;
             patchMessages();
+        } else if (action === 'toggleThinking') {
+            state.thinkingEnabled = !state.thinkingEnabled;
+            saveThinkingEnabled(state.thinkingEnabled);
+            render();
+        } else if (action === 'uploadFile') {
+            document.getElementById('file-input')?.click();
         }
         return;
     }
@@ -1017,6 +1084,15 @@ async function init() {
     root.addEventListener('input', onRootInput);
     root.addEventListener('focusin', onRootFocus);
     root.addEventListener('focusout', onRootBlur);
+    document.getElementById('file-input')?.addEventListener('change', (event) => {
+        const files = event.target.files;
+        if (files) {
+            uploadFiles = Array.from(files).filter((f) => {
+                const ext = f.name.split('.').pop().toLowerCase();
+                return ['txt', 'md', 'docx', 'png', 'jpg', 'jpeg'].includes(ext);
+            });
+        }
+    });
     render();
     try {
         await loadModels();

@@ -85,6 +85,19 @@ struct ConversationTemplateVariable
     string label
 
 
+# A conversation file attachment
+struct ConversationFile
+
+    # The file name
+    string name
+
+    # The file MIME type
+    string type
+
+    # The file data (base64 encoded)
+    string data
+
+
 # Model information
 struct ModelInfo
 
@@ -322,6 +335,12 @@ action startConversation
         # The user prompt
         string user
 
+        # If true, enable thinking mode
+        optional bool think
+
+        # Attached files [{name, type, data}]
+        optional ConversationFile[] files
+
     output
         # The new conversation identifier
         string id
@@ -397,6 +416,12 @@ action replyConversation
 
         # The user reply prompt
         string user
+
+        # If true, enable thinking mode
+        optional bool think
+
+        # Attached files [{name, type, data}]
+        optional ConversationFile[] files
 
     errors
         ConversationBusy

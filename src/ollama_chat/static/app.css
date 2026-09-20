@@ -774,6 +774,27 @@ svg.icon-small {
     cursor: default;
 }
 
+.icon-btn.thinking-active {
+    background: #202020;
+    color: #ffffff;
+}
+
+:root[data-theme="dark"] .icon-btn.thinking-active {
+    background: #ececec;
+    color: #1a1a1a;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .icon-btn.thinking-active {
+        background: #ececec;
+        color: #1a1a1a;
+    }
+}
+
+.icon-btn.upload-active {
+    background: var(--panel-active);
+}
+
 :root[data-theme="dark"] .model-pill {
     background: #2a2a2a;
 }
