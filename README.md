@@ -1,4 +1,10 @@
 ![image-chat](assets/image.png)
+
+### Fork
+
+Fork of craigahobbs/ollama-chat
+
+
 # ollama-chat
 
 [![PyPI - Status](https://img.shields.io/pypi/status/ollama-chat)](https://pypi.org/project/ollama-chat/)
@@ -6,9 +12,6 @@
 [![GitHub](https://img.shields.io/github/license/craigahobbs/ollama-chat)](https://github.com/craigahobbs/ollama-chat/blob/main/LICENSE)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ollama-chat)](https://pypi.org/project/ollama-chat/)
 
-## Fork
-
-Fork of craigahobbs/ollama-chat
 
 **Ollama Chat** is a conversational AI chat client that uses [Ollama](https://ollama.com) to
 interact with local large language models (LLMs) entirely offline. Ideal for AI enthusiasts,
