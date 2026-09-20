@@ -1,4 +1,4 @@
-/* Ollama Chat - new frontend (step a: shell + routing skeleton).
+/* Ollama Chat - new frontend (step b: sidebar + routing).
  * Plain JS, no framework, no CDN, works offline. Vendor globals:
  * window.marked (marked.umd) and window.DOMPurify (purify.min.js).
  */
@@ -14,10 +14,24 @@ const STRINGS = {
     errorLoadConversations: 'Failed to load conversations.',
     errorLoadModels: 'Failed to load models.',
     sidebarToggle: 'Toggle sidebar',
+    openSidebar: 'Open sidebar',
     themeToggle: 'Toggle theme',
     noConversations: 'No conversations yet.',
     loading: 'Loading…',
     classicLink: 'Classic UI',
+    chatMenu: 'Chat actions',
+    menuRename: 'Rename',
+    menuDownload: 'Download .md',
+    menuDelete: 'Delete',
+    renameTitle: 'Rename chat',
+    renameLabel: 'Title',
+    save: 'Save',
+    cancel: 'Cancel',
+    close: 'Close',
+    deleteTitle: 'Delete chat',
+    deleteConfirm: 'Delete this chat? This cannot be undone.',
+    deleteButton: 'Delete',
+    generating: 'Generating…',
 };
 
 /** Inline SVG icons (contour style, 20px, stroke 1.75, currentColor). */
@@ -35,6 +49,9 @@ const state = {
     route: parseRoute(),
     conversations: [],
     error: null,
+    openMenuId: null,
+    modal: null,
+    sidebarCollapsed: false,
 };
 
 function parseRoute() {
@@ -85,6 +102,40 @@ function renderMarkdown(markdownText) {
     return window.DOMPurify ? window.DOMPurify.sanitize(raw) : escapeHtml(raw);
 }
 
+/** File name for the .md export (same rules as the classic UI). */
+function buildMarkdownFilename(title) {
+    let name = String(title || '').toLowerCase().replace(/['"]/g, '');
+    name = name.replace(/[^a-z0-9]+/g, '-').replace(/^-/, '').replace(/-$/, '');
+    return `${name || 'chat'}.md`;
+}
+
+/** Markdown export body: "# <title>", "**Model:** <model>", then "## User:"/"## Model:" per exchange. */
+function buildMarkdownExport(conversation) {
+    const parts = [`# ${conversation.title}`, '', `**Model:** ${conversation.model}`];
+    for (const exchange of conversation.exchanges || []) {
+        parts.push('', '## User:', '', exchange.user, '', '## Model:', '', exchange.model);
+    }
+    return parts.join('\n');
+}
+
+function downloadFile(filename, text) {
+    const blob = new Blob([text], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function downloadChat(id) {
+    const data = await apiGet('getConversation', `id=${encodeURIComponent(id)}`);
+    const conversation = data.conversation;
+    downloadFile(buildMarkdownFilename(conversation.title), buildMarkdownExport(conversation));
+}
+
 function applyTheme(theme) {
     if (theme) {
         document.documentElement.setAttribute('data-theme', theme);
@@ -98,17 +149,73 @@ function currentTheme() {
         || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 }
 
+function chatTitle(id) {
+    const conv = state.conversations.find((item) => item.id === id);
+    return conv ? conv.title : id;
+}
+
+function renderChatItem(conv) {
+    const active = state.route.name === 'chat' && state.route.id === conv.id ? ' active' : '';
+    const menuOpen = state.openMenuId === conv.id ? ' menu-open' : '';
+    const menu = state.openMenuId === conv.id
+        ? `<div class="chat-menu" role="menu">` +
+            `<button type="button" role="menuitem" data-action="rename" data-id="${escapeHtml(conv.id)}">${escapeHtml(STRINGS.menuRename)}</button>` +
+            `<button type="button" role="menuitem" data-action="download" data-id="${escapeHtml(conv.id)}">${escapeHtml(STRINGS.menuDownload)}</button>` +
+            `<button type="button" role="menuitem" class="danger" data-action="delete" data-id="${escapeHtml(conv.id)}">${escapeHtml(STRINGS.menuDelete)}</button>` +
+            `</div>`
+        : '';
+    return `<div class="chat-item${active}${menuOpen}">` +
+        `<a class="chat-link" href="#/c/${escapeHtml(conv.id)}" title="${escapeHtml(conv.title || conv.id)}">${escapeHtml(conv.title || conv.id)}</a>` +
+        (conv.generating ? `<span class="gen-dot" title="${escapeHtml(STRINGS.generating)}" aria-label="${escapeHtml(STRINGS.generating)}"></span>` : '') +
+        `<button type="button" class="icon-btn chat-menu-btn" data-action="menu" data-id="${escapeHtml(conv.id)}" ` +
+        `title="${escapeHtml(STRINGS.chatMenu)}" aria-label="${escapeHtml(STRINGS.chatMenu)}" aria-haspopup="menu" aria-expanded="${state.openMenuId === conv.id}">${ICONS.dots}</button>` +
+        menu +
+        `</div>`;
+}
+
+function renderModal() {
+    if (!modalState()) {
+        return '';
+    }
+    const modal = modalState();
+    if (modal.type === 'rename') {
+        return `<div class="modal-overlay" id="modal-overlay">` +
+            `<div class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(STRINGS.renameTitle)}">` +
+            `<h2>${escapeHtml(STRINGS.renameTitle)}</h2>` +
+            (modal.error ? `<p class="modal-error" role="alert">${escapeHtml(modal.error)}</p>` : '') +
+            `<label>${escapeHtml(STRINGS.renameLabel)}<input id="modal-input" type="text" value="${escapeHtml(modal.title)}" maxlength="200"></label>` +
+            `<div class="modal-actions">` +
+            `<button type="button" class="btn" data-action="modal-cancel">${escapeHtml(STRINGS.cancel)}</button>` +
+            `<button type="button" class="btn btn-primary" data-action="modal-save">${escapeHtml(STRINGS.save)}</button>` +
+            `</div></div></div>`;
+    }
+    return `<div class="modal-overlay" id="modal-overlay">` +
+        `<div class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(STRINGS.deleteTitle)}">` +
+        `<h2>${escapeHtml(STRINGS.deleteTitle)}</h2>` +
+        (modal.error ? `<p class="modal-error" role="alert">${escapeHtml(modal.error)}</p>` : '') +
+        `<p>${escapeHtml(STRINGS.deleteConfirm)}</p>` +
+        `<p class="modal-target">“${escapeHtml(modal.title)}”</p>` +
+        `<div class="modal-actions">` +
+        `<button type="button" class="btn" data-action="modal-cancel">${escapeHtml(STRINGS.cancel)}</button>` +
+        `<button type="button" class="btn btn-danger" data-action="modal-confirm">${escapeHtml(STRINGS.deleteButton)}</button>` +
+        `</div></div></div>`;
+}
+
+function modalState() {
+    return state.modal;
+}
+
 function render() {
-    document.title = STRINGS.appTitle;
     const theme = currentTheme();
-    const chats = state.conversations.map((conv) => {
-        const active = state.route.name === 'chat' && state.route.id === conv.id ? ' active' : '';
-        return `<a class="nav-item${active}" href="#/c/${escapeHtml(conv.id)}">` +
-            `<span>${escapeHtml(conv.title || conv.id)}</span></a>`;
-    }).join('');
+    if (state.route.name === 'chat') {
+        document.title = `${chatTitle(state.route.id)} - ${STRINGS.appTitle}`;
+    } else {
+        document.title = STRINGS.appTitle;
+    }
+    const chats = state.conversations.map(renderChatItem).join('');
 
     root.innerHTML =
-        `<div class="layout" id="layout">` +
+        `<div class="layout${state.sidebarCollapsed ? ' sidebar-collapsed' : ''}" id="layout">` +
         `<aside class="sidebar" aria-label="${escapeHtml(STRINGS.chatsHeading)}">` +
         `<div class="sidebar-toolbar">` +
         `<button class="icon-btn" id="btn-sidebar" title="${escapeHtml(STRINGS.sidebarToggle)}" aria-label="${escapeHtml(STRINGS.sidebarToggle)}">${ICONS.panel}</button>` +
@@ -122,6 +229,11 @@ function render() {
         `<a class="nav-item" href="/classic.html">${escapeHtml(STRINGS.classicLink)}</a>` +
         `</aside>` +
         `<main class="main">` +
+        `<header class="topbar">` +
+        `<button class="icon-btn" id="btn-sidebar-open" title="${escapeHtml(STRINGS.openSidebar)}" aria-label="${escapeHtml(STRINGS.openSidebar)}">${ICONS.panel}</button>` +
+        `<span class="topbar-title">${escapeHtml(STRINGS.appTitle)}</span>` +
+        `</header>` +
+        (state.sidebarCollapsed ? `<button class="icon-btn sidebar-fab" id="btn-sidebar-fab" title="${escapeHtml(STRINGS.openSidebar)}" aria-label="${escapeHtml(STRINGS.openSidebar)}">${ICONS.panel}</button>` : '') +
         `<div class="messages"><div class="messages-inner" id="messages">` +
         (state.error ? `<div class="error-banner" role="alert">${escapeHtml(STRINGS.errorBannerPrefix)}${escapeHtml(state.error)}</div>` : '') +
         (state.route.name === 'new'
@@ -132,10 +244,25 @@ function render() {
         `<textarea rows="1" placeholder="${escapeHtml(STRINGS.composerPlaceholder)}" aria-label="${escapeHtml(STRINGS.composerPlaceholder)}" disabled></textarea>` +
         `</div></div>` +
         `</main>` +
-        `</div>`;
+        `</div>` +
+        (state.openMenuId ? `<div class="overlay" id="menu-overlay"></div>` : '') +
+        renderModal();
 
     document.getElementById('btn-sidebar').addEventListener('click', () => {
-        document.getElementById('layout').classList.toggle('sidebar-open');
+        state.sidebarCollapsed = true;
+        state.openMenuId = null;
+        render();
+    });
+    const fab = document.getElementById('btn-sidebar-fab');
+    if (fab) {
+        fab.addEventListener('click', () => {
+            state.sidebarCollapsed = false;
+            render();
+        });
+    }
+    document.getElementById('btn-sidebar-open').addEventListener('click', () => {
+        state.sidebarCollapsed = false;
+        document.getElementById('layout').classList.add('sidebar-open');
     });
     document.getElementById('btn-theme').addEventListener('click', () => {
         const next = currentTheme() === 'dark' ? 'light' : 'dark';
@@ -145,6 +272,112 @@ function render() {
         applyTheme(next);
         render();
     });
+    root.querySelectorAll('[data-action="menu"]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            state.openMenuId = state.openMenuId === button.dataset.id ? null : button.dataset.id;
+            render();
+        });
+    });
+    root.querySelectorAll('.chat-menu [data-action]').forEach((button) => {
+        button.addEventListener('click', () => {
+            handleMenuAction(button.dataset.action, button.dataset.id);
+        });
+    });
+    const menuOverlay = document.getElementById('menu-overlay');
+    if (menuOverlay) {
+        menuOverlay.addEventListener('click', () => {
+            state.openMenuId = null;
+            render();
+        });
+    }
+    const modalOverlay = document.getElementById('modal-overlay');
+    if (modalOverlay) {
+        modalOverlay.addEventListener('click', (event) => {
+            if (event.target === modalOverlay) {
+                state.modal = null;
+                render();
+            }
+        });
+    }
+    const modalCancel = root.querySelector('[data-action="modal-cancel"]');
+    if (modalCancel) {
+        modalCancel.addEventListener('click', () => {
+            state.modal = null;
+            render();
+        });
+    }
+    const modalSave = root.querySelector('[data-action="modal-save"]');
+    if (modalSave) {
+        modalSave.addEventListener('click', submitRename);
+    }
+    const modalConfirm = root.querySelector('[data-action="modal-confirm"]');
+    if (modalConfirm) {
+        modalConfirm.addEventListener('click', submitDelete);
+    }
+    const modalInput = document.getElementById('modal-input');
+    if (modalInput) {
+        modalInput.focus();
+        modalInput.select();
+        modalInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                submitRename();
+            }
+        });
+    }
+}
+
+async function handleMenuAction(action, id) {
+    if (action === 'rename') {
+        state.openMenuId = null;
+        state.modal = { type: 'rename', id, title: chatTitle(id), error: null };
+        render();
+    } else if (action === 'delete') {
+        state.openMenuId = null;
+        state.modal = { type: 'delete', id, title: chatTitle(id), error: null };
+        render();
+    } else if (action === 'download') {
+        state.openMenuId = null;
+        render();
+        try {
+            await downloadChat(id);
+        } catch (err) {
+            state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
+            render();
+        }
+    }
+}
+
+async function submitRename() {
+    const input = document.getElementById('modal-input');
+    const title = input ? input.value.trim() : '';
+    if (!title) {
+        return;
+    }
+    try {
+        await apiPost('setConversationTitle', { id: state.modal.id, title });
+        state.modal = null;
+        await refreshConversations();
+    } catch (err) {
+        state.modal.error = err.message;
+        render();
+    }
+}
+
+async function submitDelete() {
+    const id = state.modal.id;
+    try {
+        await apiPost('deleteConversation', { id });
+        state.modal = null;
+        if (state.route.name === 'chat' && state.route.id === id) {
+            window.location.hash = '#/';
+        }
+        await refreshConversations();
+    } catch (err) {
+        state.modal.error = err.message;
+        render();
+    }
 }
 
 async function refreshConversations() {
@@ -160,8 +393,22 @@ async function refreshConversations() {
 
 function onHashChange() {
     state.route = parseRoute();
+    state.openMenuId = null;
+    state.modal = null;
     document.getElementById('layout')?.classList.remove('sidebar-open');
     render();
+}
+
+function onKeyDown(event) {
+    if (event.key === 'Escape') {
+        if (state.modal) {
+            state.modal = null;
+            render();
+        } else if (state.openMenuId) {
+            state.openMenuId = null;
+            render();
+        }
+    }
 }
 
 function init() {
@@ -173,10 +420,11 @@ function init() {
         applyTheme(saved);
     }
     window.addEventListener('hashchange', onHashChange);
+    window.addEventListener('keydown', onKeyDown);
     render();
     refreshConversations();
 }
 
 init();
 
-export { STRINGS, parseRoute, renderMarkdown, escapeHtml, apiGet, apiPost };
+export { STRINGS, parseRoute, renderMarkdown, escapeHtml, apiGet, apiPost, buildMarkdownFilename, buildMarkdownExport };
