@@ -367,7 +367,7 @@ ollama-chat: 200 GET /getConversations\x20
 
             mock_thread.assert_called_once_with(
                 target=mock_open,
-                args=('http://127.0.0.1:8080/#var.vId=%27conv1%27&var.vView=%27chat%27&chat-bottom',)
+                args=('http://127.0.0.1:8080/#/c/conv1',)
             )
             thread_instance = mock_thread.return_value
             self.assertTrue(thread_instance.daemon)
@@ -399,7 +399,7 @@ ollama-chat: 200 GET /getConversations\x20
 
             mock_thread.assert_called_once_with(
                 target=mock_open,
-                args=('http://127.0.0.1:8080/#var.vId=%27conv2%27&var.vView=%27chat%27&chat-bottom',)
+                args=('http://127.0.0.1:8080/#/c/conv2',)
             )
             thread_instance = mock_thread.return_value
             self.assertTrue(thread_instance.daemon)
@@ -435,7 +435,7 @@ ollama-chat: 200 GET /getConversations\x20
 
             mock_thread.assert_called_once_with(
                 target=mock_open,
-                args=('http://127.0.0.1:8080/#var.vId=%27conv3%27&var.vView=%27chat%27&chat-bottom',)
+                args=('http://127.0.0.1:8080/#/c/conv3',)
             )
             thread_instance = mock_thread.return_value
             self.assertTrue(thread_instance.daemon)
@@ -526,7 +526,7 @@ ollama-chat: 200 GET /getConversations\x20
 
             mock_thread.assert_called_once_with(
                 target=mock_open,
-                args=('http://127.0.0.1:8080/#var.vId=%27temp1%27&var.vView=%27chat%27&chat-bottom',)
+                args=('http://127.0.0.1:8080/#/c/temp1',)
             )
             thread_instance = mock_thread.return_value
             self.assertTrue(thread_instance.daemon)
@@ -559,7 +559,7 @@ ollama-chat: 200 GET /getConversations\x20
 
             mock_thread.assert_called_once_with(
                 target=mock_open,
-                args=('http://127.0.0.1:8080/#var.vId=%27temp2%27&var.vView=%27chat%27&chat-bottom',)
+                args=('http://127.0.0.1:8080/#/c/temp2',)
             )
             thread_instance = mock_thread.return_value
             self.assertTrue(thread_instance.daemon)
@@ -592,7 +592,7 @@ ollama-chat: 200 GET /getConversations\x20
 
             mock_thread.assert_called_once_with(
                 target=mock_open,
-                args=('http://127.0.0.1:8080/#var.vId=%27temp3%27&var.vView=%27chat%27&chat-bottom',)
+                args=('http://127.0.0.1:8080/#/c/temp3',)
             )
             thread_instance = mock_thread.return_value
             self.assertTrue(thread_instance.daemon)
@@ -627,7 +627,7 @@ ollama-chat: 200 GET /getConversations\x20
 
             mock_thread.assert_called_once_with(
                 target=mock_open,
-                args=('http://127.0.0.1:8080/#var.vId=%27temp4%27&var.vView=%27chat%27&chat-bottom',)
+                args=('http://127.0.0.1:8080/#/c/temp4',)
             )
             thread_instance = mock_thread.return_value
             self.assertTrue(thread_instance.daemon)

@@ -12,7 +12,6 @@ import sys
 import threading
 import webbrowser
 
-from schema_markdown import encode_query_string
 import urllib3
 import waitress
 
@@ -102,8 +101,7 @@ def main(argv=None):
             parser.error(response.get('message') or response["error"])
 
         # Update the browser URL
-        message_args = encode_query_string({'var': {'vView': "'chat'", 'vId': f"'{response['id']}'"}})
-        browser_url = f'{url}#{message_args}&chat-bottom'
+        browser_url = f'{url}#/c/{response["id"]}'
 
     # Template command?
     elif args.template:
@@ -131,8 +129,7 @@ def main(argv=None):
             parser.error(response.get('message') or response["error"])
 
         # Update the browser URL
-        template_args = encode_query_string({'var': {'vView': "'chat'", 'vId': f"'{response['id']}'"}})
-        browser_url = f'{url}#{template_args}&chat-bottom'
+        browser_url = f'{url}#/c/{response["id"]}'
 
     # Launch the web browser on a thread (it may block)
     if args.browser:
