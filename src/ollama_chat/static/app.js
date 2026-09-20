@@ -44,6 +44,11 @@ const STRINGS = {
     modelLabel: 'Model',
     selectModel: 'Select model',
     noModels: 'No models',
+    copyLabel: 'Copy',
+    copiedLabel: 'Copied',
+    regenerateLabel: 'Regenerate',
+    deleteResponseLabel: 'Delete response',
+    codeLabel: 'code',
 };
 
 /** Inline SVG icons (contour style, 20px, stroke 1.75, currentColor). */
@@ -56,6 +61,11 @@ const ICONS = {
     up: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>',
     stop: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>',
     chevron: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
+    bulb: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.4 1 2.3h6c0-.9.4-1.8 1-2.3A7 7 0 0 0 12 2Z"/></svg>',
+    copy: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+    check: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+    refresh: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></svg>',
+    trash: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>',
 };
 
 /** Poll interval (ms) while a response is generating. */
@@ -81,6 +91,7 @@ const state = {
     drafts: {},
     composerFocus: false,
     sending: false,
+    thinkingOpen: {},
 };
 
 function parseRoute() {
@@ -231,6 +242,7 @@ function patchMessages() {
     const box = messagesBox();
     const stick = box ? isNearBottom(box) : true;
     inner.innerHTML = buildMessagesHtml();
+    enhanceCodeBlocks(inner);
     if (stick) {
         scrollMessagesToBottom();
     }
@@ -247,20 +259,178 @@ function patchSidebarList() {
     }
 }
 
-function renderExchange(exchange, isLast, generating) {
+function isThinkingOpen(ix, isLast, generating) {
+    if (Object.prototype.hasOwnProperty.call(state.thinkingOpen, ix)) {
+        return state.thinkingOpen[ix];
+    }
+    return isLast && generating;
+}
+
+function renderThinking(exchange, ix, isLast, generating) {
+    const open = isThinkingOpen(ix, isLast, generating);
+    const label = generating && isLast ? STRINGS.thinkingNow : STRINGS.thoughtDone;
+    return `<div class="thinking">` +
+        `<button type="button" class="thinking-head" data-action="thinking" data-ix="${ix}" aria-expanded="${open}">` +
+        `${ICONS.bulb}<span>${escapeHtml(label)}</span>${ICONS.chevron}</button>` +
+        `<div class="thinking-body md"${open ? '' : ' hidden'}>${renderMarkdown(exchange.thinking)}</div>` +
+        `</div>`;
+}
+
+function renderActions(ix, isLast, generating) {
+    let html = `<div class="msg-actions">` +
+        `<button type="button" class="action-btn" data-action="copy" data-ix="${ix}" ` +
+        `title="${escapeHtml(STRINGS.copyLabel)}" aria-label="${escapeHtml(STRINGS.copyLabel)}">${ICONS.copy}</button>`;
+    if (isLast && !generating) {
+        html += `<button type="button" class="action-btn" data-action="regenerate" ` +
+            `title="${escapeHtml(STRINGS.regenerateLabel)}" aria-label="${escapeHtml(STRINGS.regenerateLabel)}">${ICONS.refresh}</button>` +
+            `<button type="button" class="action-btn" data-action="delete-exchange" ` +
+            `title="${escapeHtml(STRINGS.deleteResponseLabel)}" aria-label="${escapeHtml(STRINGS.deleteResponseLabel)}">${ICONS.trash}</button>`;
+    }
+    return `${html}</div>`;
+}
+
+function renderExchange(exchange, ix, isLast, generating) {
     let html = `<div class="msg msg-user"><div class="bubble">${escapeHtml(exchange.user)}</div></div>`;
     if (exchange.thinking) {
-        const open = generating && isLast ? ' open' : '';
-        const label = generating && isLast ? STRINGS.thinkingNow : STRINGS.thoughtDone;
-        html += `<details class="thinking"${open}><summary>${escapeHtml(label)}</summary>` +
-            `<div class="md">${renderMarkdown(exchange.thinking)}</div></details>`;
+        html += renderThinking(exchange, ix, isLast, generating);
     }
     if (exchange.model) {
-        html += `<div class="msg msg-model"><div class="md">${renderMarkdown(exchange.model)}</div></div>`;
+        html += `<div class="msg msg-model"><div class="md">${renderMarkdown(exchange.model)}</div>` +
+            renderActions(ix, isLast, generating) + `</div>`;
     } else if (generating && isLast) {
         html += `<div class="msg msg-model"><span class="typing" aria-label="${escapeHtml(STRINGS.generating)}">…</span></div>`;
     }
     return html;
+}
+
+/** Wrap rendered <pre> blocks with a language label + copy button (DOM APIs only, no innerHTML). */
+function enhanceCodeBlocks(container) {
+    if (!container || !container.querySelectorAll || !document.createElement) {
+        return;
+    }
+    const pres = container.querySelectorAll('pre');
+    pres.forEach((pre) => {
+        if (pre.parentNode && pre.parentNode.classList && pre.parentNode.classList.contains('codeblock')) {
+            return;
+        }
+        const code = pre.querySelector ? pre.querySelector('code') : null;
+        let lang = '';
+        if (code && code.className) {
+            const match = code.className.match(/language-([\w+-]+)/);
+            if (match) {
+                lang = match[1];
+            }
+        }
+        const wrap = document.createElement('div');
+        wrap.className = 'codeblock';
+        const head = document.createElement('div');
+        head.className = 'codeblock-head';
+        const label = document.createElement('span');
+        label.className = 'codeblock-lang';
+        label.textContent = lang || STRINGS.codeLabel;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'codeblock-copy';
+        button.textContent = STRINGS.copyLabel;
+        button.setAttribute('aria-label', STRINGS.copyLabel);
+        button.addEventListener('click', () => copyCode(button, code || pre));
+        head.appendChild(label);
+        head.appendChild(button);
+        pre.parentNode.insertBefore(wrap, pre);
+        wrap.appendChild(head);
+        wrap.appendChild(pre);
+    });
+}
+
+async function copyText(text) {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+    const area = document.createElement('textarea');
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+}
+
+function flashCopied(button, done) {
+    try {
+        button.classList.add('copied');
+        if (done) {
+            const previous = button.innerHTML;
+            button.innerHTML = ICONS.check;
+            setTimeout(() => {
+                if (button.isConnected) {
+                    button.innerHTML = previous;
+                    button.classList.remove('copied');
+                }
+            }, 1200);
+        } else {
+            const previous = button.textContent;
+            button.textContent = STRINGS.copiedLabel;
+            setTimeout(() => {
+                if (button.isConnected) {
+                    button.textContent = previous;
+                    button.classList.remove('copied');
+                }
+            }, 1200);
+        }
+    } catch (err) { /* ignore */ }
+}
+
+async function copyCode(button, node) {
+    try {
+        await copyText(node.textContent);
+        flashCopied(button, false);
+    } catch (err) {
+        state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
+        render();
+    }
+}
+
+async function copyExchange(button, ix) {
+    const conv = state.current && state.current.conversation;
+    const exchange = conv && (conv.exchanges || [])[ix];
+    if (!exchange) {
+        return;
+    }
+    try {
+        await copyText(exchange.model);
+        flashCopied(button, true);
+    } catch (err) {
+        state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
+        render();
+    }
+}
+
+async function regenerateLastExchange() {
+    if (state.route.name !== 'chat') {
+        return;
+    }
+    try {
+        await apiPost('regenerateConversationExchange', { id: state.route.id });
+        state.thinkingOpen = {};
+        await loadConversation(state.route.id);
+    } catch (err) {
+        state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
+        render();
+    }
+}
+
+async function deleteLastExchange() {
+    if (state.route.name !== 'chat') {
+        return;
+    }
+    try {
+        await apiPost('deleteConversationExchange', { id: state.route.id });
+        state.thinkingOpen = {};
+        await loadConversation(state.route.id);
+    } catch (err) {
+        state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
+        render();
+    }
 }
 
 function buildMessagesHtml() {
@@ -286,7 +456,7 @@ function buildMessagesHtml() {
     }
     const exchanges = cur.conversation.exchanges || [];
     exchanges.forEach((exchange, index) => {
-        html += renderExchange(exchange, index === exchanges.length - 1, cur.generating);
+        html += renderExchange(exchange, index, index === exchanges.length - 1, cur.generating);
     });
     return html;
 }
@@ -416,6 +586,7 @@ function render() {
         renderModal();
 
     autoresizeComposer();
+    enhanceCodeBlocks(document.getElementById('messages'));
     const modalInput = document.getElementById('modal-input');
     if (modalInput) {
         modalInput.focus();
@@ -467,6 +638,7 @@ function schedulePoll() {
 async function loadConversation(id) {
     stopPolling();
     state.current = { id, loading: true, error: null, conversation: null, generating: false };
+    state.thinkingOpen = {};
     render();
     scrollMessagesToBottom();
     try {
@@ -661,6 +833,7 @@ function onHashChange() {
     state.modelMenuOpen = false;
     state.current = null;
     state.sending = false;
+    state.thinkingOpen = {};
     document.getElementById('layout')?.classList.remove('sidebar-open');
     render();
     if (state.route.name === 'chat') {
@@ -691,6 +864,19 @@ function onRootClick(event) {
             loadConversation(state.route.id);
         } else if (action === 'send') {
             submitComposer();
+        } else if (action === 'copy') {
+            copyExchange(actionButton, Number(actionButton.dataset.ix));
+        } else if (action === 'regenerate') {
+            regenerateLastExchange();
+        } else if (action === 'delete-exchange') {
+            deleteLastExchange();
+        } else if (action === 'thinking') {
+            const ix = Number(actionButton.dataset.ix);
+            const cur = state.current;
+            const lastIx = cur && cur.conversation ? (cur.conversation.exchanges || []).length - 1 : -1;
+            const shown = isThinkingOpen(ix, ix === lastIx, Boolean(cur && cur.generating));
+            state.thinkingOpen[ix] = !shown;
+            patchMessages();
         }
         return;
     }

@@ -779,3 +779,117 @@ svg.icon-small {
         color: #1a1a1a;
     }
 }
+
+/* Thinking, message actions, code blocks (step e) */
+
+.thinking {
+    border: 0;
+    padding: 0;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.thinking-head {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.thinking-head:hover {
+    color: var(--text);
+}
+
+.thinking-head:focus-visible,
+.action-btn:focus-visible,
+.codeblock-copy:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+.thinking-body {
+    margin: 4px 0 8px;
+}
+
+.thinking-body[hidden] {
+    display: none;
+}
+
+.msg-actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.action-btn:hover {
+    background: var(--panel-active);
+    color: var(--text);
+}
+
+.action-btn.copied {
+    color: var(--text);
+}
+
+.codeblock {
+    background: var(--code-bg);
+    border-radius: var(--radius-code);
+    margin: 0.6em 0;
+    overflow: hidden;
+}
+
+.codeblock-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 8px 6px 12px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.codeblock-lang {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.codeblock-copy {
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    padding: 2px 8px;
+    cursor: pointer;
+}
+
+.codeblock-copy:hover {
+    background: var(--panel-active);
+    color: var(--text);
+}
+
+.codeblock pre {
+    margin: 0;
+    border-radius: 0;
+    background: transparent;
+}
