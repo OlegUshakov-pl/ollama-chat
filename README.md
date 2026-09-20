@@ -1,4 +1,4 @@
-![image-chat](image.png)
+![image-chat](assets/image.png)
 # ollama-chat
 
 [![PyPI - Status](https://img.shields.io/pypi/status/ollama-chat)](https://pypi.org/project/ollama-chat/)
