@@ -1092,6 +1092,7 @@ async function init() {
                     const ext = f.name.split('.').pop().toLowerCase();
                     return ['txt', 'md', 'docx', 'png', 'jpg', 'jpeg'].includes(ext);
                 });
+                render();
             }
         }
     });
