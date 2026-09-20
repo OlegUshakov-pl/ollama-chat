@@ -18,6 +18,7 @@
     --column-width: 780px;
     --font: system-ui, "Segoe UI", -apple-system, Roboto, sans-serif;
     --focus-ring: #0a84ff;
+    --composer-focus: #9c9c9c;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -201,8 +202,7 @@ body {
 }
 
 .icon-btn:focus-visible,
-.nav-item:focus-visible,
-.composer textarea:focus-visible {
+.nav-item:focus-visible {
     outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
 }
@@ -651,7 +651,7 @@ svg.icon {
 }
 
 .composer:focus-within {
-    outline: 2px solid var(--focus-ring);
+    outline: 1px solid var(--composer-focus);
     outline-offset: 2px;
 }
 
