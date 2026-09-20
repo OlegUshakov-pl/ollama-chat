@@ -795,6 +795,28 @@ svg.icon-small {
     background: var(--panel-active);
 }
 
+.file-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 220px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    background: #ffffff;
+    color: #555555;
+    font: inherit;
+    font-size: 14px;
+    cursor: default;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+:root[data-theme="dark"] .file-pill {
+    background: #2a2a2a;
+}
+
 :root[data-theme="dark"] .model-pill {
     background: #2a2a2a;
 }
