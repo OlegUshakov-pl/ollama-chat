@@ -47,5 +47,8 @@ packages = ["ollama_chat", "ollama_chat.static"]
 ollama_chat = [
     "static/*.bare",
     "static/*.html",
-    "static/*.smd"
+    "static/*.smd",
+    "static/*.css",
+    "static/*.js",
+    "static/vendor/*.js"
 ]

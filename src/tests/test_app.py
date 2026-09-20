@@ -33,6 +33,9 @@ class TestApp(unittest.TestCase):
             self.assertListEqual(
                 sorted(request.name for request in app.requests.values() if request.doc_group.startswith('Ollama Chat ')),
                 [
+                    'app.css',
+                    'app.js',
+                    'classic.html',
                     'createTemplate',
                     'deleteConversation',
                     'deleteConversationExchange',
@@ -60,7 +63,9 @@ class TestApp(unittest.TestCase):
                     'startTemplate',
                     'stopConversation',
                     'stopModelDownload',
-                    'updateTemplate'
+                    'updateTemplate',
+                    'vendor/marked.min.js',
+                    'vendor/purify.min.js',
                 ]
             )
 
@@ -76,6 +81,9 @@ class TestApp(unittest.TestCase):
             self.assertListEqual(
                 sorted(request.name for request in app.requests.values() if request.doc_group.startswith('Ollama Chat ')),
                 [
+                    'app.css',
+                    'app.js',
+                    'classic.html',
                     'createTemplate',
                     'deleteConversation',
                     'deleteConversationExchange',
@@ -103,7 +111,9 @@ class TestApp(unittest.TestCase):
                     'startTemplate',
                     'stopConversation',
                     'stopModelDownload',
-                    'updateTemplate'
+                    'updateTemplate',
+                    'vendor/marked.min.js',
+                    'vendor/purify.min.js',
                 ]
             )
 

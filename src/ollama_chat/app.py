@@ -68,6 +68,11 @@ class OllamaChat(chisel.Application):
 
         # Front-end statics
         self.add_static('index.html', urls=(('GET', None), ('GET', '/')))
+        self.add_static('app.css')
+        self.add_static('app.js')
+        self.add_static('classic.html')
+        self.add_static('vendor/marked.min.js')
+        self.add_static('vendor/purify.min.js')
         self.add_static('ollamaChat.bare')
         self.add_static('ollamaChatConversation.bare')
         self.add_static('ollamaChatModels.bare')
@@ -96,7 +101,8 @@ def _start_response_xorigin(start_response, status, headers):
 _CONTENT_TYPES = {
     '.css': 'text/css; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',
-    '.html': 'text/html; charset=utf-8'
+    '.html': 'text/html; charset=utf-8',
+    '.svg': 'image/svg+xml'
 }
 
 

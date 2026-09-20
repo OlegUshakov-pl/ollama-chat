@@ -1,25 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <title>Ollama Chat</title>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <link rel="stylesheet" href="/markdown-up/app.css">
-        <link rel="preload" href="/markdown-up/bare-script/static/markdown.css" as="style">
-        <link rel="modulepreload" href="/markdown-up/lib/appImports.js" as="script">
-    </head>
-    <script type="module">
-        import {MarkdownUp} from '/markdown-up/lib/appImports.js';
-        const app = new MarkdownUp(window, {
-            'systemPrefix': '/markdown-up/include/',
-            'markdownText': `\
-~~~ markdown-script
-include 'ollamaChat.bare'
-
-ollamaChatMain()
-~~~
-`
-        });
-        app.run();
-    </script>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ollama Chat</title>
+    <link rel="stylesheet" href="/app.css">
+    <script src="/vendor/marked.min.js" defer></script>
+    <script src="/vendor/purify.min.js" defer></script>
+    <script type="module" src="/app.js"></script>
+</head>
+<body>
+    <div id="app"></div>
+    <noscript>Ollama Chat requires JavaScript.</noscript>
+</body>
 </html>
