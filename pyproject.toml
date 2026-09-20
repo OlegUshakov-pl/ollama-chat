@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/craigahobbs/ollama-chat"
+Homepage = "https://github.com/OlegUshakov-pl/ollama-chat.git"
 
 [project.scripts]
 ollama-chat = "ollama_chat.main:main"
