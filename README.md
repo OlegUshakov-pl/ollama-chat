@@ -1,8 +1,8 @@
 ![image-chat](assets/image.png)
 
-### Fork
+# Fork
 
-Fork of craigahobbs/ollama-chat
+## **Fork of craigahobbs/ollama-chat**
 
 
 # ollama-chat
