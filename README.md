@@ -2,7 +2,7 @@
 
 # Fork
 
-## **Fork of craigahobbs/ollama-chat**
+## **Fork of [craigahobbs/ollama-chat](https://github.com/craigahobbs/ollama-chat)**
 
 
 # ollama-chat
