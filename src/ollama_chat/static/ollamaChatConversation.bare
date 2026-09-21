@@ -313,7 +313,7 @@ async function ollamaChatConversationOnTitleUpdate(args):
     # Update the conversation title
     title = stringTrim(documentInputValue(ollamaChatConversationTitleID))
     if title:
-        systemFetch({ \
+        _unused = systemFetch({ \
             'url': 'setConversationTitle', \
             'body': jsonStringify({'id': objectGet(args, 'id'), 'title': title}) \
         })

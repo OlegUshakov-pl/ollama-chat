@@ -873,10 +873,15 @@ async function submitRename() {
     if (!title) {
         return;
     }
+    const renamedId = state.modal.id;
     try {
-        await apiPost('setConversationTitle', { id: state.modal.id, title });
+        await apiPost('setConversationTitle', { id: renamedId, title });
         state.modal = null;
         await refreshConversations();
+        if (state.current && state.current.conversation && state.current.id === renamedId) {
+            state.current.conversation.title = title;
+        }
+        render();
     } catch (err) {
         state.modal.error = err.message;
         render();
