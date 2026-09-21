@@ -981,3 +981,28 @@ svg.icon-small {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+.md-viewer {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.md-viewer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--panel-border);
+}
+
+.md-viewer-header strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.md-viewer-body {
+    padding: 4px 0;
+}

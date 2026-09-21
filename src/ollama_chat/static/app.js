@@ -51,6 +51,9 @@ const STRINGS = {
     thinkingOn: 'Thinking on',
     thinkingOff: 'Thinking off',
     uploadFile: 'Upload file',
+    openMd: 'Open markdown',
+    mdViewerTitle: 'Markdown preview',
+    mdClose: 'Close preview',
 };
 
 /** Inline SVG icons (contour style, 20px, stroke 1.75, currentColor). */
@@ -72,6 +75,7 @@ const ICONS = {
     paw: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="10" r="5"/><path d="M8 21v-1a4 4 0 0 1 4-4 4 4 0 0 1 4 4v1"/><path d="M16 7.5V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2.5"/><path d="M4 11.5V9a6 6 0 0 1 6-6h0a6 6 0 0 1 6 6v2.5"/></svg>',
     pawOff: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="10" r="5"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="4" y1="7" x2="20" y2="23"/><path d="M16 7.5V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2.5"/></svg>',
     upload: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+    md: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg>',
 };
 
 /** Poll interval (ms) while a response is generating. */
@@ -102,6 +106,7 @@ const state = {
     thinkingOpen: {},
     thinkingEnabled: loadThinkingEnabled(),
     uploading: false,
+    mdViewer: null,
 };
 
 function loadThinkingEnabled() {
@@ -494,7 +499,22 @@ async function deleteLastExchange() {
     }
 }
 
+function buildMdViewerHtml() {
+    const viewer = state.mdViewer;
+    if (!viewer) return '';
+    return `<div class="md-viewer">` +
+        `<div class="md-viewer-header">` +
+        `<strong>${escapeHtml(viewer.name)}</strong>` +
+        `<button type="button" class="btn" data-action="closeMd">${escapeHtml(STRINGS.mdClose)}</button>` +
+        `</div>` +
+        `<div class="md md-viewer-body">${renderMarkdown(viewer.text)}</div>` +
+        `</div>`;
+}
+
 function buildMessagesHtml() {
+    if (state.mdViewer) {
+        return buildMdViewerHtml();
+    }
     if (state.route.name === 'new') {
         return (state.error ? `<div class="error-banner" role="alert">${escapeHtml(STRINGS.errorBannerPrefix)}${escapeHtml(state.error)}</div>` : '') +
             `<p>${escapeHtml(STRINGS.greeting)}</p>`;
@@ -647,6 +667,7 @@ function render() {
         `<div class="sidebar-toolbar">` +
         `<button class="icon-btn" id="btn-sidebar" title="${escapeHtml(STRINGS.sidebarToggle)}" aria-label="${escapeHtml(STRINGS.sidebarToggle)}">${ICONS.panel}</button>` +
         `<button class="icon-btn" id="btn-theme" title="${escapeHtml(STRINGS.themeToggle)}" aria-label="${escapeHtml(STRINGS.themeToggle)}">${theme === 'dark' ? ICONS.sun : ICONS.moon}</button>` +
+        `<button class="icon-btn" id="btn-md" title="${escapeHtml(STRINGS.openMd)}" aria-label="${escapeHtml(STRINGS.openMd)}">${ICONS.md}</button>` +
         `</div>` +
         `<nav class="nav-list">` +
         `<a class="nav-item${state.route.name === 'new' ? ' active' : ''}" href="#/">${ICONS.newChat}<span>${escapeHtml(STRINGS.navChat)}</span></a>` +
@@ -666,7 +687,8 @@ function render() {
         `</main>` +
         `</div>` +
         (state.openMenuId || state.modelMenuOpen ? `<div class="overlay" id="menu-overlay"></div>` : '') +
-        renderModal();
+        renderModal() +
+        `<input type="file" id="md-file-input" accept=".md,.markdown,text/markdown" style="display:none">`;
 
     autoresizeComposer();
     enhanceCodeBlocks(document.getElementById('messages'));
@@ -923,6 +945,7 @@ function onHashChange() {
     state.openMenuId = null;
     state.modal = null;
     state.modelMenuOpen = false;
+    state.mdViewer = null;
     state.current = null;
     state.sending = false;
     state.thinkingOpen = {};
@@ -977,6 +1000,9 @@ function onRootClick(event) {
             render();
         } else if (action === 'uploadFile') {
             document.getElementById('file-input')?.click();
+        } else if (action === 'closeMd') {
+            state.mdViewer = null;
+            render();
         }
         return;
     }
@@ -991,7 +1017,7 @@ function onRootClick(event) {
         render();
         return;
     }
-    const button = event.target.closest ? event.target.closest('#btn-sidebar,#btn-sidebar-open,#btn-sidebar-fab,#btn-theme,#model-pill') : null;
+    const button = event.target.closest ? event.target.closest('#btn-sidebar,#btn-sidebar-open,#btn-sidebar-fab,#btn-theme,#btn-md,#model-pill') : null;
     if (button) {
         if (button.id === 'btn-sidebar') {
             state.sidebarCollapsed = true;
@@ -1012,6 +1038,8 @@ function onRootClick(event) {
             render();
         } else if (button.id === 'model-pill') {
             toggleModelMenu();
+        } else if (button.id === 'btn-md') {
+            document.getElementById('md-file-input')?.click();
         }
     }
 }
@@ -1066,6 +1094,9 @@ function onKeyDown(event) {
         if (state.modal) {
             state.modal = null;
             render();
+        } else if (state.mdViewer) {
+            state.mdViewer = null;
+            render();
         } else if (state.openMenuId || state.modelMenuOpen) {
             state.openMenuId = null;
             state.modelMenuOpen = false;
@@ -1098,6 +1129,25 @@ async function init() {
                     return ['txt', 'md', 'docx', 'png', 'jpg', 'jpeg'].includes(ext);
                 });
                 render();
+            }
+        } else if (event.target.id === 'md-file-input') {
+            const file = event.target.files && event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    state.mdViewer = { name: file.name, text: String(reader.result || '') };
+                    event.target.value = '';
+                    render();
+                    enhanceCodeBlocks(document.getElementById('messages'));
+                };
+                reader.onerror = () => {
+                    state.error = `${STRINGS.errorBannerPrefix}Failed to read ${file.name}`;
+                    event.target.value = '';
+                    render();
+                };
+                reader.readAsText(file);
+            } else {
+                event.target.value = '';
             }
         }
     });
