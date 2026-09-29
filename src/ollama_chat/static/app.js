@@ -51,6 +51,10 @@ const STRINGS = {
     thinkingOn: 'Thinking on',
     thinkingOff: 'Thinking off',
     uploadFile: 'Upload file',
+    uploadFilesMax: 'A maximum of 10 files can be attached to a message.',
+    uploadFilesType: 'Only txt, md, docx, png, jpg and jpeg files can be attached.',
+    removeFile: 'Remove file',
+    attachedFiles: 'Attached files',
     openMd: 'Open markdown',
     mdViewerTitle: 'Markdown preview',
     mdClose: 'Close preview',
@@ -75,11 +79,21 @@ const ICONS = {
     paw: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="10" r="5"/><path d="M8 21v-1a4 4 0 0 1 4-4 4 4 0 0 1 4 4v1"/><path d="M16 7.5V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2.5"/><path d="M4 11.5V9a6 6 0 0 1 6-6h0a6 6 0 0 1 6 6v2.5"/></svg>',
     pawOff: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="10" r="5"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="4" y1="7" x2="20" y2="23"/><path d="M16 7.5V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2.5"/></svg>',
     upload: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+    clip: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57a4 4 0 1 1 5.66 5.66l-8.58 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
     md: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg>',
 };
 
 /** Poll interval (ms) while a response is generating. */
 const POLL_MS = 400;
+
+/** Maximum number of files that can be attached to a single message. */
+const MAX_ATTACH_FILES = 10;
+
+/** File extensions accepted as message attachments. */
+const ATTACH_FILE_EXTS = ['txt', 'md', 'docx', 'png', 'jpg', 'jpeg'];
+
+/** File extensions read as base64 images rather than text. */
+const IMAGE_FILE_EXTS = ['png', 'jpg', 'jpeg'];
 
 /** Distance (px) from the bottom that still counts as "at the bottom" for autoscroll. */
 const SCROLL_STICK_PX = 80;
@@ -119,17 +133,62 @@ function saveThinkingEnabled(val) {
     try { window.localStorage.setItem('ollama-chat-thinking', String(val)); } catch (err) { /* ignore */ }
 }
 
+function fileExt(name) {
+    return String(name).split('.').pop().toLowerCase();
+}
+
+function isAttachFile(file) {
+    return ATTACH_FILE_EXTS.includes(fileExt(file.name));
+}
+
+function uploadFileKey(file) {
+    return `${file.name}:${file.size}`;
+}
+
+/** The attachment-related error banner messages. */
+function uploadError(kind) {
+    return `${STRINGS.errorBannerPrefix}${kind}`;
+}
+
+function isUploadError() {
+    return state.error === uploadError(STRINGS.uploadFilesMax) || state.error === uploadError(STRINGS.uploadFilesType);
+}
+
+/** Add the selected files to the attachment list (keeping the 10 file maximum). */
+function addUploadFiles(selected) {
+    const rejected = selected.filter((file) => !isAttachFile(file));
+    const chosen = selected.filter((file) => isAttachFile(file) &&
+        !uploadFiles.some((fileCur) => uploadFileKey(fileCur) === uploadFileKey(file)));
+    const room = Math.max(MAX_ATTACH_FILES - uploadFiles.length, 0);
+    uploadFiles = uploadFiles.concat(chosen.slice(0, room));
+    if (rejected.length) {
+        state.error = uploadError(STRINGS.uploadFilesType);
+    } else if (chosen.length > room) {
+        state.error = uploadError(STRINGS.uploadFilesMax);
+    } else if (isUploadError()) {
+        state.error = null;
+    }
+    return uploadFiles.length;
+}
+
+/** Remove one of the attached files by its index. */
+function removeUploadFile(ix) {
+    uploadFiles.splice(ix, 1);
+    if (state.error === uploadError(STRINGS.uploadFilesMax)) {
+        state.error = null;
+    }
+}
+
 function readFilesAsData(files) {
     const results = [];
-    for (const file of files) {
-        const ext = file.name.split('.').pop().toLowerCase();
-        const allowed = ['txt', 'md', 'docx', 'png', 'jpg', 'jpeg'];
-        if (!allowed.includes(ext)) continue;
+    for (const file of files.slice(0, MAX_ATTACH_FILES)) {
+        const ext = fileExt(file.name);
+        if (!ATTACH_FILE_EXTS.includes(ext)) continue;
         results.push(new Promise((resolve) => {
             const reader = new FileReader();
             reader.onload = () => {
                 let data;
-                if (['png', 'jpg', 'jpeg'].includes(ext)) {
+                if (IMAGE_FILE_EXTS.includes(ext)) {
                     const base64 = reader.result.split(',')[1] || reader.result;
                     data = base64;
                 } else {
@@ -138,7 +197,7 @@ function readFilesAsData(files) {
                 resolve({ name: file.name, type: file.type || `application/${ext === 'docx' ? 'vnd.openxmlformats-officedocument.wordprocessingml.document' : ext === 'md' ? 'markdown' : ext === 'txt' ? 'plaintext' : ext === 'png' ? 'png' : 'jpeg'}`, data });
             };
             reader.onerror = () => resolve(null);
-            if (['png', 'jpg', 'jpeg'].includes(ext)) {
+            if (IMAGE_FILE_EXTS.includes(ext)) {
                 reader.readAsDataURL(file);
             } else {
                 reader.readAsText(file);
@@ -219,7 +278,12 @@ function buildMarkdownFilename(title) {
 function buildMarkdownExport(conversation) {
     const parts = [`# ${conversation.title}`, '', `**Model:** ${conversation.model}`];
     for (const exchange of conversation.exchanges || []) {
-        parts.push('', '## User:', '', exchange.user, '', '## Model:', '', exchange.model);
+        parts.push('', '## User:', '');
+        const files = exchange.files || [];
+        if (files.length) {
+            parts.push(`**Files:** ${files.map((file) => file.name).join(', ')}`, '');
+        }
+        parts.push(exchange.user, '', '## Model:', '', exchange.model);
     }
     return parts.join('\n');
 }
@@ -355,8 +419,22 @@ function renderActions(ix, isLast, generating) {
     return `${html}</div>`;
 }
 
+/** Render an exchange's attached file references as chips. */
+function renderExchangeFiles(files) {
+    if (!files || !files.length) {
+        return '';
+    }
+    const chips = files.map((file) => {
+        const name = file.name || '';
+        return `<span class="msg-file" title="${escapeHtml(name)}">${ICONS.clip}<span class="msg-file-name">${escapeHtml(name)}</span></span>`;
+    }).join('');
+    return `<div class="msg-files" aria-label="${escapeHtml(STRINGS.attachedFiles)}">${chips}</div>`;
+}
+
 function renderExchange(exchange, ix, isLast, generating) {
-    let html = `<div class="msg msg-user"><div class="bubble">${escapeHtml(exchange.user)}</div></div>`;
+    const filesHtml = renderExchangeFiles(exchange.files);
+    let html = `<div class="msg msg-user">${filesHtml}` +
+        (exchange.user || !filesHtml ? `<div class="bubble">${escapeHtml(exchange.user)}</div>` : '') + `</div>`;
     if (exchange.thinking) {
         html += renderThinking(exchange, ix, isLast, generating);
     }
@@ -606,6 +684,7 @@ function buildComposerHtml() {
     const thinkingTitle = state.thinkingEnabled ? STRINGS.thinkingOn : STRINGS.thinkingOff;
     return `<textarea id="composer-input" rows="1" placeholder="${escapeHtml(STRINGS.composerPlaceholder)}" ` +
         `aria-label="${escapeHtml(STRINGS.composerPlaceholder)}">${escapeHtml(draft)}</textarea>` +
+        (uploadFiles.length ? buildUploadChipsHtml() : '') +
         `<div class="composer-row">` +
         `<div class="model-picker">` +
         (readOnly
@@ -617,12 +696,23 @@ function buildComposerHtml() {
         `<button type="button" class="icon-btn${state.thinkingEnabled ? ' thinking-active' : ''}" id="thinking-btn" data-action="toggleThinking" ` +
         `title="${escapeHtml(thinkingTitle)}" aria-label="${escapeHtml(thinkingTitle)}">${thinkingIcon}</button>` +
         `<button type="button" class="icon-btn${uploadFiles.length ? ' upload-active' : ''}" id="upload-btn" data-action="uploadFile" ` +
-        `title="${escapeHtml(uploadFiles.length ? uploadFiles.length + ' file(s) selected' : STRINGS.uploadFile)}" aria-label="${escapeHtml(STRINGS.uploadFile)}">${ICONS.upload}</button>` +
-        (uploadFiles.length ? `<span class="file-pill">${escapeHtml(uploadFiles.map(f => f.name).join(', '))}</span>` : '') +
+        `title="${escapeHtml(uploadFiles.length ? `${uploadFiles.length} / ${MAX_ATTACH_FILES}` : STRINGS.uploadFile)}" aria-label="${escapeHtml(STRINGS.uploadFile)}">${ICONS.upload}</button>` +
         `<input type="file" id="file-input" accept=".txt,.md,.docx,.png,.jpg,.jpeg" multiple style="display:none">` +
         `<button type="button" class="send-btn${canSend ? ' ready' : ''}" id="send-btn" data-action="send" ` +
         `title="${escapeHtml(sendLabel)}" aria-label="${escapeHtml(sendLabel)}"${canSend || generating ? '' : ' disabled'}>${sendIcon}</button>` +
         `</div>`;
+}
+
+/** The attached-files chips shown above the composer controls. */
+function buildUploadChipsHtml() {
+    const chips = uploadFiles.map((file, ix) =>
+        `<span class="file-chip" title="${escapeHtml(file.name)}">${ICONS.clip}` +
+        `<span class="file-chip-name">${escapeHtml(file.name)}</span>` +
+        `<button type="button" class="file-chip-remove" data-action="removeFile" data-ix="${ix}" ` +
+        `title="${escapeHtml(STRINGS.removeFile)}" aria-label="${escapeHtml(`${STRINGS.removeFile}: ${file.name}`)}">&times;</button>` +
+        `</span>`).join('');
+    return `<div class="file-chips" aria-label="${escapeHtml(STRINGS.attachedFiles)}">${chips}` +
+        `<span class="file-chip-count">${uploadFiles.length} / ${MAX_ATTACH_FILES}</span></div>`;
 }
 
 function renderModal() {
@@ -1000,6 +1090,10 @@ function onRootClick(event) {
             render();
         } else if (action === 'uploadFile') {
             document.getElementById('file-input')?.click();
+        } else if (action === 'removeFile') {
+            removeUploadFile(Number(actionButton.dataset.ix));
+            state.composerFocus = true;
+            render();
         } else if (action === 'closeMd') {
             state.mdViewer = null;
             render();
@@ -1123,13 +1217,11 @@ async function init() {
     root.addEventListener('change', (event) => {
         if (event.target.id === 'file-input') {
             const files = event.target.files;
-            if (files) {
-                uploadFiles = Array.from(files).filter((f) => {
-                    const ext = f.name.split('.').pop().toLowerCase();
-                    return ['txt', 'md', 'docx', 'png', 'jpg', 'jpeg'].includes(ext);
-                });
-                render();
+            if (files && files.length) {
+                addUploadFiles(Array.from(files));
             }
+            event.target.value = '';
+            render();
         } else if (event.target.id === 'md-file-input') {
             const file = event.target.files && event.target.files[0];
             if (file) {

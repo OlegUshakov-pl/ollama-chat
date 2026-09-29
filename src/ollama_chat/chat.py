@@ -26,7 +26,7 @@ class ChatManager():
     __slots__ = ('app', 'conversation_id', 'prompts', 'stop', 'think', 'files')
 
 
-    def __init__(self, app, conversation_id, prompts, think=False, files=None):
+    def __init__(self, app, conversation_id, prompts, think=None, files=None):
         self.app = app
         self.conversation_id = conversation_id
         self.prompts = list(prompts)
@@ -66,9 +66,16 @@ class ChatManager():
 
                     # Attach files to the last user message
                     if chat.files:
+                        # Remember the attachments on the exchange so they can be shown in the chat
+                        conversation['exchanges'][-1]['files'] = [
+                            {
+                                'name': file_item['name'],
+                                **({'type': file_item['type']} if file_item.get('type') else {})
+                            }
+                            for file_item in chat.files
+                        ]
                         for file_item in chat.files:
                             file_name = file_item['name']
-                            file_type = file_item.get('type', '')
                             file_data = file_item.get('data', '')
                             ext = os.path.splitext(file_name)[1].lower()
                             if ext in ('.png', '.jpg', '.jpeg'):
@@ -80,10 +87,9 @@ class ChatManager():
                             else:
                                 try:
                                     if ext == '.docx':
-                                        import base64 as _base64
                                         from docx import Document
                                         from io import BytesIO as _BytesIO
-                                        doc = Document(_BytesIO(_base64.b64decode(file_data)))
+                                        doc = Document(_BytesIO(base64.b64decode(file_data)))
                                         file_text = '\n'.join(p.text for p in doc.paragraphs)
                                     else:
                                         file_text = file_data

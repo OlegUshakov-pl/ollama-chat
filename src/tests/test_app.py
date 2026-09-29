@@ -1077,7 +1077,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Hello'])
+            mock_manager.assert_called_once_with(app, response['id'], ['Hello'], think=False, files=None)
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1108,7 +1108,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Hello'])
+            mock_manager.assert_called_once_with(app, response['id'], ['Hello'], think=False, files=None)
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1138,7 +1138,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], [prompt])
+            mock_manager.assert_called_once_with(app, response['id'], [prompt], think=False, files=None)
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1182,6 +1182,106 @@ class TestAPI(unittest.TestCase):
             self.assertFalse(os.path.exists(config_path))
 
 
+    def test_start_conversation_files(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({'model': 'llm', 'conversations': []}))
+        ]
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('uuid.uuid4', return_value = '12345678-1234-5678-1234-567812345678'), \
+             unittest.mock.patch('ollama_chat.app.ChatManager') as mock_manager:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            files = [{'name': f'file{ix}.txt', 'type': 'text/plain', 'data': 'hello'} for ix in range(10)]
+
+            # Attach the maximum number of files
+            request = {'user': 'Hello', 'files': files}
+            status, headers, content_bytes = app.request('POST', '/startConversation', wsgi_input=json.dumps(request).encode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
+            mock_manager.assert_called_once_with(app, response['id'], ['Hello'], think=False, files=files)
+            mock_manager.reset_mock()
+
+            # Attach one file too many
+            request = {'user': 'Hello', 'files': files + [{'name': 'file10.txt', 'type': 'text/plain', 'data': 'hello'}]}
+            status, headers, content_bytes = app.request('POST', '/startConversation', wsgi_input=json.dumps(request).encode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(response['error'], 'InvalidInput')
+            self.assertEqual(response['member'], 'files')
+            mock_manager.assert_not_called()
+
+
+    def test_reply_conversation_files(self):
+        original_config = {
+            'conversations': [
+                {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': [{'user': 'Hello', 'model': 'Hi there'}]}
+            ]
+        }
+        test_files = [
+            ('ollama-chat.json', json.dumps(original_config))
+        ]
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('ollama_chat.app.ChatManager') as mock_manager:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            files = [{'name': f'file{ix}.md', 'type': 'text/markdown', 'data': 'hello'} for ix in range(10)]
+
+            # Reply with the maximum number of files
+            request = {'id': 'conv1', 'user': 'How are you?', 'files': files}
+            status, headers, content_bytes = app.request('POST', '/replyConversation', wsgi_input=json.dumps(request).encode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {})
+            mock_manager.assert_called_once_with(app, 'conv1', ['How are you?'], think=False, files=files)
+            mock_manager.reset_mock()
+
+            # Reply with one file too many
+            request = {'id': 'conv1', 'user': 'How are you?', 'files': files + [{'name': 'file10.md', 'type': 'text/markdown', 'data': 'hello'}]}
+            status, headers, content_bytes = app.request('POST', '/replyConversation', wsgi_input=json.dumps(request).encode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(response['error'], 'InvalidInput')
+            self.assertEqual(response['member'], 'files')
+            mock_manager.assert_not_called()
+
+
+    def test_get_conversation_files(self):
+        original_config = {
+            'conversations': [
+                {
+                    'id': 'conv1',
+                    'model': 'llm',
+                    'title': 'Conversation 1',
+                    'exchanges': [
+                        {
+                            'user': 'Hello',
+                            'model': 'Hi there',
+                            'files': [
+                                {'name': 'a.txt', 'type': 'text/plain'},
+                                {'name': 'b.png'}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        test_files = [
+            ('ollama-chat.json', json.dumps(original_config))
+        ]
+        with create_test_files(test_files) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            # The stored file references are returned with the conversation
+            status, headers, content_bytes = app.request('GET', '/getConversation', query_string=encode_query_string({'id': 'conv1'}))
+            self.assertEqual(status, '200 OK')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertListEqual(
+                response['conversation']['exchanges'][0]['files'],
+                [{'name': 'a.txt', 'type': 'text/plain'}, {'name': 'b.png'}]
+            )
+
+
     def test_start_template(self):
         original_config = {
             'model': 'llm',
@@ -1206,7 +1306,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'])
+            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None)
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1250,7 +1350,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'])
+            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None)
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1293,7 +1393,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'])
+            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None)
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1675,7 +1775,7 @@ class TestAPI(unittest.TestCase):
             self.assertEqual(status, '200 OK')
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {})
-            mock_manager.assert_called_once_with(app, 'conv1', ['How are you?'])
+            mock_manager.assert_called_once_with(app, 'conv1', ['How are you?'], think=False, files=None)
             self.assertIs(app.chats['conv1'], mock_manager.return_value)
 
             # Verify the app config

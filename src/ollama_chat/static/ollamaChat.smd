@@ -51,6 +51,9 @@ struct ConversationExchange
     # The model's thinking
     optional string thinking
 
+    # The exchange's attached file references (at most 10)
+    optional ConversationFileRef[len <= 10] files
+
 
 # A conversation template info struct
 struct ConversationTemplateInfo
@@ -96,6 +99,16 @@ struct ConversationFile
 
     # The file data (base64 encoded)
     string data
+
+
+# A stored conversation file reference - just enough to show the attachment in the chat
+struct ConversationFileRef
+
+    # The file name
+    string name
+
+    # The file MIME type
+    optional string type
 
 
 # Model information
@@ -338,8 +351,8 @@ action startConversation
         # If true, enable thinking mode
         optional bool think
 
-        # Attached files [{name, type, data}]
-        optional ConversationFile[] files
+        # Attached files [{name, type, data}] - at most 10 files
+        optional ConversationFile[len <= 10] files
 
     output
         # The new conversation identifier
@@ -420,8 +433,8 @@ action replyConversation
         # If true, enable thinking mode
         optional bool think
 
-        # Attached files [{name, type, data}]
-        optional ConversationFile[] files
+        # Attached files [{name, type, data}] - at most 10 files
+        optional ConversationFile[len <= 10] files
 
     errors
         ConversationBusy

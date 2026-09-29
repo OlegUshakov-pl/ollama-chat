@@ -795,26 +795,78 @@ svg.icon-small {
     background: var(--panel-active);
 }
 
-.file-pill {
+.file-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.file-chip-count {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.file-chip,
+.msg-file {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    max-width: 220px;
-    padding: 6px 12px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 5px 8px 5px 10px;
     border-radius: 999px;
     border: 1px solid var(--panel-border);
-    background: #ffffff;
-    color: #555555;
+    background: var(--bg);
+    color: var(--text-secondary);
     font: inherit;
-    font-size: 14px;
-    cursor: default;
+    font-size: 13px;
+}
+
+.file-chip-name,
+.msg-file-name {
+    min-width: 0;
+    max-width: 240px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-:root[data-theme="dark"] .file-pill {
-    background: #2a2a2a;
+.file-chip-remove {
+    flex: none;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 15px;
+    line-height: 1;
+    padding: 0 3px;
+    cursor: pointer;
+    border-radius: 50%;
+}
+
+.file-chip-remove:hover {
+    background: var(--panel-active);
+    color: var(--text);
+}
+
+.file-chip-remove:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+}
+
+.msg-files {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    max-width: 80%;
+    margin-bottom: 4px;
+}
+
+.msg-file {
+    max-width: 100%;
 }
 
 :root[data-theme="dark"] .model-pill {
