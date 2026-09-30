@@ -87,8 +87,8 @@ class ChatManager():
                             else:
                                 try:
                                     if ext == '.docx':
-                                        from docx import Document
-                                        from io import BytesIO as _BytesIO
+                                        from docx import Document # pylint: disable=import-outside-toplevel
+                                        from io import BytesIO as _BytesIO # pylint: disable=import-outside-toplevel
                                         doc = Document(_BytesIO(base64.b64decode(file_data)))
                                         file_text = '\n'.join(p.text for p in doc.paragraphs)
                                     else:
