@@ -843,6 +843,7 @@ function render() {
 
     autoresizeComposer();
     enhanceCodeBlocks(document.getElementById('messages'));
+    scrollMessagesToBottom();
     const modalInput = document.getElementById('modal-input');
     if (modalInput) {
         modalInput.focus();
