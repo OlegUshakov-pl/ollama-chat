@@ -15,6 +15,7 @@
 
 - **Completely redesigned theme** — light / dark (`prefers-color-scheme` + `data-theme`), new sidebar / composer / messages layout, mobile-responsive. See `src/ollama_chat/static/app.css` and `src/ollama_chat/static/app.js`.
 - **Thinking mode toggle** — paw button in composer. Sends `{"think": true|false}` via `startConversation` / `replyConversation` → `ChatManager(think=...)` → `ollama_chat(..., think=...)` (`src/ollama_chat/ollama.py:43`, `src/ollama_chat/chat.py:23`). Persisted in `localStorage` (`ollama-chat-thinking`). Visual state `icon-btn thinking-active` (`src/ollama_chat/static/app.css:777`).
+- **Web search (tool calling)** — globe button left of the thinking paw. Sends `{"search": true|false}`, the back-end hands Ollama two tools (`web_search`, `fetch_page`) and runs the `tool_calls` loop (max 5 rounds per answer) → `ChatManager(search=...)` → `ollama_chat(..., tools=...)` (`src/ollama_chat/web_tools.py`, `src/ollama_chat/chat.py`). Persisted in `localStorage` (`ollama-chat-websearch`), off by default. Active class `icon-btn websearch-active`; used tools are shown as a collapsible block in the chat.
 - **File attachments** — upload button in composer, **up to 10 files per message** (selected files accumulate, each chip has a remove button, `3 / 10` counter). Supported: `txt`, `md`, `docx`, `png`, `jpg`, `jpeg`. Text is appended to user message, `docx` parsed with `python-docx`, images sent as base64 `images` (`src/ollama_chat/chat.py:67`, `src/ollama_chat/static/app.js:149`). Attached file names are stored on the exchange (`ConversationFileRef`) and shown as chips above each user message, sending with empty text allowed.
 - **Markdown viewer (.md preview in chat)** — button next to theme toggle in sidebar toolbar. Opens system file picker (`accept=".md,.markdown"`), reads file with `FileReader` and renders it **inside the chat area** via `marked` + `DOMPurify` (`src/ollama_chat/static/app.js:505`, `src/ollama_chat/static/app.css:987`). Header shows filename + `Close preview` button, `Esc` also closes. No upload to server, works offline.
 - **Reliable rename** — `Rename` in chat menu now updates both sidebar and open header instantly and awaits `POST /setConversationTitle` before navigation (`src/ollama_chat/static/app.js:885`, `src/ollama_chat/static/ollamaChatConversation.bare:312`).
@@ -78,6 +79,7 @@ ollama-chat -t askAristotle -v question "Why is the sky blue?"
 
 - Offline chats with local LLMs, multiple concurrent conversations
 - **Thinking toggle** (paw, `thinkingOn`/`thinkingOff`, respects model `capabilities` fallback)
+- **Web search toggle** (globe) — the model searches the web and reads pages by itself (tool calling), SSRF-protected
 - **File uploads** — up to 10 files per message (`txt`/`md`/`docx` as text, `png`/`jpg`/`jpeg` as images)
 - **Markdown viewer** — open local `.md` files in chat area, rendered safely
 - **Rename / Delete / Download .md / Regenerate** per chat
@@ -91,6 +93,22 @@ ollama-chat -t askAristotle -v question "Why is the sky blue?"
 
 ### Thinking mode
 Paw button left of upload in composer. Persisted across restarts. Included as `{"think": bool}`. Backend honors explicit value otherwise falls back to model capabilities (`src/ollama_chat/ollama.py:57`). Active class `icon-btn thinking-active`.
+
+### Web search
+Globe button left of the paw button in composer. Persisted across restarts (`localStorage` key `ollama-chat-websearch`, off by default) and included as `{"search": bool}` in `startConversation` / `replyConversation`.
+
+When it is on, the back-end sends Ollama a `tools` array with two functions (`src/ollama_chat/web_tools.py`):
+
+- `web_search(query, max_results = 5)` — DuckDuckGo search via the `ddgs` package, returns `{title, url, snippet}`
+- `fetch_page(url)` — downloads a page, extracts the readable text with `trafilatura` (trimmed to 6000 characters)
+
+The model decides when to use them. Every `tool_calls` round is executed, its result is appended to the messages as a `tool` role message and the request is repeated — at most **5 rounds per answer**, after which the tools are withdrawn so the model has to answer. Tool failures are returned to the model as plain text (`Error: ...`) instead of failing the request. Each exchange remembers what the model used (`ConversationTool {action, value}`) and shows it as a collapsible block in the chat (`🔍 Search: <query>` / `🌐 Opened page: <url>`).
+
+If the model has no `tools` capability (checked via `/api/show` `capabilities`, like `think` for thinking), the search is turned off for that run and a notice is added to the answer.
+
+**SSRF protection** — only `http`/`https` URLs; the host is resolved and all of its addresses must be public (loopback, private, link-local, CGNAT, multicast and reserved ranges are rejected), redirects are followed manually (at most 5 hops) with every hop re-checked, the response is limited to 2 MB and read timeouts are 10 seconds. Targets such as `localhost`, `127.0.0.1`, `10.x`, `192.168.x`, `169.254.169.254` and `[::1]` are blocked, and the model never sees raw stack traces.
+
+**Recommended models** — any model with tool-calling support: `qwen3`, `llama3.1`, `mistral`, `gemma3`, `kimi-k2`, `qwen2.5-coder` and similar. Check yours with `ollama show <model>` — the `Capabilities` line must contain `tools`.
 
 ### File attachments
 Click upload icon → select one or more files (up to 10, `multiple`) → each file appears as a removable chip above the composer controls with a `n / 10` counter → Send. New selections are **added** to the current ones; a banner appears if you try to attach an 11th file or an unsupported type. Read via `FileReader` (`src/ollama_chat/static/app.js:171`), attached server-side (`src/ollama_chat/chat.py:67`). The attached file names are saved on the exchange and rendered as chips above the user message for the whole conversation; they are also included in the `.md` export as `**Files:** ...`.
@@ -140,7 +158,7 @@ nano $HOME/.local/share/applications/ollama-chat.desktop
 
 [Ollama Chat File Format](https://craigahobbs.github.io/ollama-chat/api.html#var.vName='OllamaChatConfig')
 [Ollama Chat API](https://craigahobbs.github.io/ollama-chat/api.html)
-Schema: `src/ollama_chat/static/ollamaChat.smd` — fork adds `think`/`files` to `StartConversation`/`ReplyConversation`/`StartTemplate`.
+Schema: `src/ollama_chat/static/ollamaChat.smd` — fork adds `think`/`files`/`search` to `StartConversation`/`ReplyConversation`/`StartTemplate`, and `tools` to `ConversationExchange`.
 
 ## Development
 

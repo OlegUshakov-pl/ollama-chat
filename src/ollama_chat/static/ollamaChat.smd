@@ -54,6 +54,19 @@ struct ConversationExchange
     # The exchange's attached file references (at most 10)
     optional ConversationFileRef[len <= 10] files
 
+    # The web tool calls the model made during this exchange
+    optional ConversationTool[] tools
+
+
+# A web tool call made by the model
+struct ConversationTool
+
+    # The tool action - 'search' (web_search) or 'open' (fetch_page)
+    string action
+
+    # The search query or the page URL
+    string value
+
 
 # A conversation template info struct
 struct ConversationTemplateInfo
@@ -351,6 +364,9 @@ action startConversation
         # If true, enable thinking mode
         optional bool think
 
+        # If true, let the model search the web and read web pages
+        optional bool search
+
         # Attached files [{name, type, data}] - at most 10 files
         optional ConversationFile[len <= 10] files
 
@@ -432,6 +448,9 @@ action replyConversation
 
         # If true, enable thinking mode
         optional bool think
+
+        # If true, let the model search the web and read web pages
+        optional bool search
 
         # Attached files [{name, type, data}] - at most 10 files
         optional ConversationFile[len <= 10] files

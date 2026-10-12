@@ -9,6 +9,7 @@ import argparse
 import base64
 import functools
 import itertools
+import json
 import os
 import pathlib
 import re
@@ -18,21 +19,27 @@ import threading
 
 import urllib3
 
-from .ollama import ollama_chat
+from .ollama import ollama_chat, ollama_show
+from .web_tools import SEARCH_MAX_RESULTS, WEB_TOOLS, fetch_page, web_search
+
+
+# The maximum number of tool call rounds per chat response
+_MAX_TOOL_ROUNDS = 5
 
 
 # The ollama chat manager class
 class ChatManager():
-    __slots__ = ('app', 'conversation_id', 'prompts', 'stop', 'think', 'files')
+    __slots__ = ('app', 'conversation_id', 'prompts', 'stop', 'think', 'files', 'search')
 
 
-    def __init__(self, app, conversation_id, prompts, think=None, files=None):
+    def __init__(self, app, conversation_id, prompts, think=None, files=None, search=False):
         self.app = app
         self.conversation_id = conversation_id
         self.prompts = list(prompts)
         self.stop = False
         self.think = think
         self.files = files or []
+        self.search = search
 
         # Start the chat thread
         chat_thread = threading.Thread(target=self.chat_thread_fn, args=(self,))
@@ -54,6 +61,18 @@ class ChatManager():
                     # Add the next user prompt
                     conversation['exchanges'].append({'user': chat.prompts[0], 'model': ''})
                     del chat.prompts[0]
+
+                    # Enable the web search tools if the model supports tool calling
+                    model_show = None
+                    tools = None
+                    if chat.search:
+                        model_show = ollama_show(chat.app.pool_manager, model)
+                        if 'tools' in (model_show.get('capabilities') or []):
+                            tools = WEB_TOOLS
+                        else:
+                            chat.search = False
+                            conversation['exchanges'][-1]['model'] += \
+                                '\n**Web search is unavailable:** this model does not support tool calling.'
 
                     # Process user prompt commands append to messages (unless there's a "do" command)
                     for exchange in conversation['exchanges']:
@@ -138,21 +157,63 @@ class ChatManager():
                         exchange['model'] = '\n\n'.join(reversed(messages))
                         continue
 
-                # Stream the chat response
-                for chunk in ollama_chat(chat.app.pool_manager, model, messages, think=chat.think):
-                    if chat.stop:
+                # Stream the chat response, executing the model's tool calls until it answers
+                tool_rounds = 0
+                while True:
+                    # Offer the tools until the tool call limit is reached
+                    request_tools = tools if tools is None or tool_rounds < _MAX_TOOL_ROUNDS else None
+
+                    # Stream this round's response, collecting the model's tool calls
+                    round_content = ''
+                    tool_calls = []
+                    for chunk in ollama_chat(
+                        chat.app.pool_manager, model, messages,
+                        think=chat.think, tools=request_tools, model_show=model_show
+                    ):
+                        if chat.stop:
+                            break
+
+                        # Update the conversation
+                        with chat.app.config() as config:
+                            conversation = config_conversation(config, chat.conversation_id)
+                            exchange = conversation['exchanges'][-1]
+                            message = chunk.get('message') or {}
+                            if 'thinking' in message:
+                                if 'thinking' not in exchange:
+                                    exchange['thinking'] = ''
+                                exchange['thinking'] += message['thinking']
+                            if message.get('content'):
+                                exchange['model'] += message['content']
+                                round_content += message['content']
+                            if message.get('tool_calls'):
+                                tool_calls.extend(message['tool_calls'])
+                    if chat.stop or not tool_calls or request_tools is None:
                         break
 
-                    # Update the conversation
-                    with chat.app.config() as config:
-                        conversation = config_conversation(config, chat.conversation_id)
-                        exchange = conversation['exchanges'][-1]
-                        if 'thinking' in chunk['message']:
-                            if 'thinking' not in exchange:
-                                exchange['thinking'] = ''
-                            exchange['thinking'] += chunk['message']['thinking']
-                        else:
-                            exchange['model'] += chunk['message']['content']
+                    # Execute the tool calls and add their results to the messages
+                    tool_rounds += 1
+                    messages.append({'role': 'assistant', 'content': round_content, 'tool_calls': tool_calls})
+                    tool_events = []
+                    for tool_call in tool_calls:
+                        tool_name, arguments = _tool_call_arguments(tool_call)
+                        try:
+                            tool_content, tool_event = _run_tool(chat, tool_name, arguments)
+                        except Exception as exc:
+                            # Tool errors are returned to the model as text rather than failing the request
+                            tool_content = f'Error: {exc}'
+                            tool_event = None
+                        if tool_event is not None:
+                            tool_events.append(tool_event)
+                        messages.append({'role': 'tool', 'tool_name': tool_name, 'content': tool_content})
+
+                    # Remember the tool usage on the exchange so it can be shown in the chat
+                    if tool_events:
+                        with chat.app.config() as config:
+                            conversation = config_conversation(config, chat.conversation_id)
+                            exchange = conversation['exchanges'][-1]
+                            if 'tools' not in exchange:
+                                exchange['tools'] = []
+                            exchange['tools'].extend(tool_events)
                 if chat.stop:
                     break
 
@@ -198,6 +259,52 @@ def config_template_prompts(template, variable_values):
         prompts = [re_variables.sub(lambda match: variable_values[match.group(1)], prompt) for prompt in prompts]
 
     return title, prompts
+
+
+# Get a tool call's name and arguments
+def _tool_call_arguments(tool_call):
+    function = tool_call.get('function') or {}
+    tool_name = function.get('name') or ''
+    arguments = function.get('arguments') or {}
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            arguments = {}
+    if not isinstance(arguments, dict):
+        arguments = {}
+    return tool_name, arguments
+
+
+# Run a model tool call, returning the tool's result text and its chat event ({action, value})
+def _run_tool(chat, tool_name, arguments):
+    # Search the web
+    if tool_name == 'web_search':
+        query = str(arguments.get('query') or '').strip()
+        if not query:
+            raise ValueError('missing "query" argument')
+        try:
+            max_results = max(1, min(int(arguments.get('max_results')), SEARCH_MAX_RESULTS))
+        except (TypeError, ValueError):
+            max_results = SEARCH_MAX_RESULTS
+        results = web_search(query, max_results=max_results)
+        event = {'action': 'search', 'value': query}
+        if not results:
+            return f'No results found for "{query}"', event
+        pages = '\n\n'.join(
+            f'{index + 1}. {result["title"]}\n{result["url"]}\n{result["snippet"]}'
+            for index, result in enumerate(results)
+        )
+        return f'Search results for "{query}":\n\n{pages}', event
+
+    # Read a web page
+    if tool_name == 'fetch_page':
+        url = str(arguments.get('url') or '').strip()
+        if not url:
+            raise ValueError('missing "url" argument')
+        return fetch_page(url, chat.app.pool_manager), {'action': 'open', 'value': url}
+
+    raise ValueError(f'unknown tool "{tool_name}"')
 
 
 # Process prompt commands

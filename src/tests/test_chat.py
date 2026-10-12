@@ -2,18 +2,43 @@
 # https://github.com/craigahobbs/ollama-chat/blob/main/LICENSE
 
 import base64
+import copy
+import io
 import json
 import os
 import pathlib
 import unittest
 import unittest.mock
 
+import docx
 import urllib3
 
 from ollama_chat.app import OllamaChat
-from ollama_chat.chat import _escape_markdown_text, _process_commands, config_template_prompts, ChatManager
+from ollama_chat.chat import (
+    _escape_markdown_text, _process_commands, _run_tool, _tool_call_arguments, config_template_prompts, ChatManager
+)
+from ollama_chat.web_tools import WEB_TOOLS
 
 from .util import create_test_files
+
+
+# Helper pool manager request side effect recording each call's payload. The payloads are copied
+# because the chat messages list is mutated in place as tool call results are appended.
+def record_requests(responses, requests):
+    def request(*args, **kwargs):
+        requests.append((args, copy.deepcopy(kwargs.get('json'))))
+        return responses.pop(0)
+    return request
+
+
+# Helper to build a base64-encoded docx attachment
+def docx_data(*paragraphs):
+    buffer = io.BytesIO()
+    document = docx.Document()
+    for text in paragraphs:
+        document.add_paragraph(text)
+    document.save(buffer)
+    return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
 
 class TestChatManager(unittest.TestCase):
@@ -243,6 +268,148 @@ class TestChatManager(unittest.TestCase):
                 config_file['conversations'][0]['exchanges'][0]['files'],
                 [{'name': 'notes.txt', 'type': 'text/plain'}, {'name': 'pic.png', 'type': 'image/png'}]
             )
+
+    def test_chat_fn_files_attachments(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ]
+            }))
+        ]
+        bad_docx = base64.b64encode(b'not a docx').decode('utf-8')
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('threading.Thread'), \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+
+            # Create a mock show response
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': []}
+
+            # Create a mock chat response
+            mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response.status = 200
+            mock_chat_response.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'Hi there!'}}).encode('utf-8')
+            ]
+
+            # Configure the mock pool manager instance
+            mock_pool_manager_instance = mock_pool_manager.return_value
+            mock_pool_manager_instance.request.side_effect = [mock_show_response, mock_chat_response]
+
+            # Create the ChatManager instance with images, a readable docx, and a broken docx
+            chat_files = [
+                {'name': 'pic1.png', 'type': 'image/png', 'data': 'aW1n'},
+                {'name': 'pic2.jpg', 'type': 'image/jpeg', 'data': 'aW5n'},
+                {'name': 'doc.docx', 'type': 'application/docx', 'data': docx_data('docx notes')},
+                {'name': 'bad.docx', 'data': bad_docx}
+            ]
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            chat_manager = ChatManager(app, 'conv1', ['Hello'], files=chat_files)
+            app.chats['conv1'] = chat_manager
+
+            # Run the thread function
+            ChatManager.chat_thread_fn(chat_manager)
+            self.assertDictEqual(app.chats, {})
+
+            # Both images are attached and the file text is appended to the user message
+            messages = mock_pool_manager_instance.request.call_args_list[1].kwargs['json']['messages']
+            self.assertEqual(len(messages), 1)
+            self.assertEqual(messages[0]['role'], 'user')
+            self.assertListEqual(messages[0]['images'], ['aW1n', 'aW5n'])
+            self.assertTrue(
+                messages[0]['content'].startswith('Hello\n\ndocx notes\n\n**Error reading bad.docx:** '),
+                messages[0]['content']
+            )
+
+            # The attachments are remembered on the exchange
+            with app.config() as config:
+                exchange = config['conversations'][0]['exchanges'][0]
+                self.assertListEqual(exchange['files'], [
+                    {'name': 'pic1.png', 'type': 'image/png'},
+                    {'name': 'pic2.jpg', 'type': 'image/jpeg'},
+                    {'name': 'doc.docx', 'type': 'application/docx'},
+                    {'name': 'bad.docx'}
+                ])
+
+    def test_chat_fn_files_do_template(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ],
+                'templates': [
+                    {'id': 'tmpl1', 'title': 'Template', 'name': 'tmpl', 'prompts': ['Template prompt']}
+                ]
+            }))
+        ]
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('threading.Thread'), \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+
+            # Create a mock show response
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': []}
+
+            # Create a mock chat response
+            mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response.status = 200
+            mock_chat_response.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'Done.'}}).encode('utf-8')
+            ]
+
+            # Configure the mock pool manager instance
+            mock_pool_manager_instance = mock_pool_manager.return_value
+            mock_pool_manager_instance.request.side_effect = [mock_show_response, mock_chat_response]
+
+            # The /do command leaves no user message to attach the files to
+            chat_files = [
+                {'name': 'notes.txt', 'type': 'text/plain', 'data': 'the notes'},
+                {'name': 'pic.png', 'type': 'image/png', 'data': 'aW1n'},
+                {'name': 'bad.docx', 'data': base64.b64encode(b'not a docx').decode('utf-8')}
+            ]
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            chat_manager = ChatManager(app, 'conv1', ['/do tmpl'], files=chat_files)
+            app.chats['conv1'] = chat_manager
+
+            # Run the thread function
+            ChatManager.chat_thread_fn(chat_manager)
+            self.assertDictEqual(app.chats, {})
+
+            # The template prompt is the only message sent to the model
+            messages = mock_pool_manager_instance.request.call_args_list[1].kwargs['json']['messages']
+            self.assertListEqual(messages, [{'role': 'user', 'content': 'Template prompt', 'images': None}])
+
+            # Verify the app config
+            with app.config() as config:
+                self.assertDictEqual(config, {
+                    'conversations': [
+                        {
+                            'id': 'conv1',
+                            'model': 'llm',
+                            'title': 'Conversation 1',
+                            'exchanges': [
+                                {
+                                    'user': '/do tmpl',
+                                    'model': 'Executing template "tmpl"',
+                                    'files': [
+                                        {'name': 'notes.txt', 'type': 'text/plain'},
+                                        {'name': 'pic.png', 'type': 'image/png'},
+                                        {'name': 'bad.docx'}
+                                    ]
+                                },
+                                {'user': 'Template prompt', 'model': 'Done.'}
+                            ]
+                        }
+                    ],
+                    'templates': [
+                        {'id': 'tmpl1', 'title': 'Template', 'name': 'tmpl', 'prompts': ['Template prompt']}
+                    ]
+                })
 
 
     def test_chat_fn_thinking(self):
@@ -1152,6 +1319,327 @@ file content
             with open(config_path, 'r', encoding='utf-8') as config_fh:
                 self.assertEqual(json.load(config_fh), expected_config)
 
+    def test_chat_fn_web_search(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ]
+            }))
+        ]
+        tool_call = {'function': {'name': 'web_search', 'arguments': {'query': 'python news'}}}
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('threading.Thread') as mock_thread, \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager, \
+             unittest.mock.patch(
+                 'ollama_chat.chat.web_search',
+                 return_value=[{'title': 'Title', 'url': 'http://example.com/', 'snippet': 'Snippet'}]
+             ) as mock_web_search:
+
+            # Create a mock show response with the tools capability
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': ['tools']}
+
+            # Create a mock chat response with a tool call
+            mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response.status = 200
+            mock_chat_response.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'Looking... '}}).encode('utf-8'),
+                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8')
+            ]
+
+            # Create a mock chat response with the final answer
+            mock_chat_response2 = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response2.status = 200
+            mock_chat_response2.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'The answer.'}}).encode('utf-8')
+            ]
+
+            # Configure the mock pool manager instance
+            requests = []
+            mock_pool_manager_instance = mock_pool_manager.return_value
+            mock_pool_manager_instance.request.side_effect = record_requests(
+                [mock_show_response, mock_chat_response, mock_chat_response2], requests
+            )
+
+            # Create the ChatManager instance
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            chat_manager = ChatManager(app, 'conv1', ['Hello'], search=True)
+            app.chats['conv1'] = chat_manager
+            mock_thread.assert_called_once_with(target=ChatManager.chat_thread_fn, args=(chat_manager,))
+
+            # Run the thread function
+            ChatManager.chat_thread_fn(chat_manager)
+            self.assertDictEqual(app.chats, {})
+
+            # Verify the ollama.chat calls - the model's tools and the tool result messages
+            mock_web_search.assert_called_once_with('python news', max_results=5)
+            self.assertEqual(mock_pool_manager_instance.request.call_count, 3)
+            chat_calls = [payload for args, payload in requests if args[1].endswith('/api/chat')]
+            self.assertEqual(len(chat_calls), 2)
+            self.assertIn('tools', chat_calls[0])
+            self.assertListEqual(chat_calls[0]['tools'], WEB_TOOLS)
+            self.assertListEqual(
+                chat_calls[0]['messages'],
+                [
+                    {'role': 'user', 'content': 'Hello', 'images': None}
+                ]
+            )
+            self.assertIn('tools', chat_calls[1])
+            self.assertListEqual(
+                chat_calls[1]['messages'],
+                [
+                    {'role': 'user', 'content': 'Hello', 'images': None},
+                    {'role': 'assistant', 'content': 'Looking... ', 'tool_calls': [tool_call]},
+                    {
+                        'role': 'tool',
+                        'tool_name': 'web_search',
+                        'content': 'Search results for "python news":\n\n1. Title\nhttp://example.com/\nSnippet'
+                    }
+                ]
+            )
+
+            # Verify the app config
+            expected_config = {
+                'conversations': [
+                    {
+                        'id': 'conv1',
+                        'model': 'llm',
+                        'title': 'Conversation 1',
+                        'exchanges': [
+                            {
+                                'user': 'Hello',
+                                'model': 'Looking... The answer.',
+                                'tools': [{'action': 'search', 'value': 'python news'}]
+                            }
+                        ]
+                    }
+                ]
+            }
+            with app.config() as config:
+                self.assertDictEqual(config, expected_config)
+
+            # Verify the config file
+            with open(config_path, 'r', encoding='utf-8') as config_fh:
+                self.assertEqual(json.load(config_fh), expected_config)
+
+    def test_chat_fn_web_search_unsupported_model(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ]
+            }))
+        ]
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('threading.Thread'), \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+
+            # Create a mock show response without the tools capability
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': ['completion']}
+
+            # Create a mock chat response
+            mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response.status = 200
+            mock_chat_response.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'The answer.'}}).encode('utf-8')
+            ]
+
+            # Configure the mock pool manager instance
+            requests = []
+            mock_pool_manager_instance = mock_pool_manager.return_value
+            mock_pool_manager_instance.request.side_effect = record_requests(
+                [mock_show_response, mock_chat_response], requests
+            )
+
+            # Create the ChatManager instance
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            chat_manager = ChatManager(app, 'conv1', ['Hello'], search=True)
+            app.chats['conv1'] = chat_manager
+
+            # Run the thread function
+            ChatManager.chat_thread_fn(chat_manager)
+            self.assertDictEqual(app.chats, {})
+
+            # Verify the chat request doesn't offer the tools
+            chat_calls = [payload for args, payload in requests if args[1].endswith('/api/chat')]
+            self.assertEqual(len(chat_calls), 1)
+            self.assertNotIn('tools', chat_calls[0])
+
+            # Verify the app config
+            expected_config = {
+                'conversations': [
+                    {
+                        'id': 'conv1',
+                        'model': 'llm',
+                        'title': 'Conversation 1',
+                        'exchanges': [
+                            {
+                                'user': 'Hello',
+                                'model': '\n**Web search is unavailable:** this model does not support ' \
+                                    'tool calling.The answer.'
+                            }
+                        ]
+                    }
+                ]
+            }
+            with app.config() as config:
+                self.assertDictEqual(config, expected_config)
+
+    def test_chat_fn_web_search_tool_error(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ]
+            }))
+        ]
+        tool_call = {'function': {'name': 'fetch_page', 'arguments': {'url': 'file:///etc/passwd'}}}
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('threading.Thread'), \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager, \
+             unittest.mock.patch(
+                 'ollama_chat.chat.fetch_page', side_effect=ValueError('only http and https URLs are allowed')
+             ):
+
+            # Create a mock show response with the tools capability
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': ['tools']}
+
+            # Create a mock chat response with a tool call
+            mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response.status = 200
+            mock_chat_response.read_chunked.return_value = [
+                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8')
+            ]
+
+            # Create a mock chat response with the final answer
+            mock_chat_response2 = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response2.status = 200
+            mock_chat_response2.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'Cannot read that page.'}}).encode('utf-8')
+            ]
+
+            # Configure the mock pool manager instance
+            requests = []
+            mock_pool_manager_instance = mock_pool_manager.return_value
+            mock_pool_manager_instance.request.side_effect = record_requests(
+                [mock_show_response, mock_chat_response, mock_chat_response2], requests
+            )
+
+            # Create the ChatManager instance
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            chat_manager = ChatManager(app, 'conv1', ['Hello'], search=True)
+            app.chats['conv1'] = chat_manager
+
+            # Run the thread function
+            ChatManager.chat_thread_fn(chat_manager)
+            self.assertDictEqual(app.chats, {})
+
+            # Verify the tool error is returned to the model as text
+            chat_calls = [payload for args, payload in requests if args[1].endswith('/api/chat')]
+            self.assertEqual(len(chat_calls), 2)
+            self.assertListEqual(
+                chat_calls[1]['messages'],
+                [
+                    {'role': 'user', 'content': 'Hello', 'images': None},
+                    {'role': 'assistant', 'content': '', 'tool_calls': [tool_call]},
+                    {
+                        'role': 'tool',
+                        'tool_name': 'fetch_page',
+                        'content': 'Error: only http and https URLs are allowed'
+                    }
+                ]
+            )
+
+            # Verify the app config - no tool usage is recorded for a failed tool
+            expected_config = {
+                'conversations': [
+                    {
+                        'id': 'conv1',
+                        'model': 'llm',
+                        'title': 'Conversation 1',
+                        'exchanges': [
+                            {
+                                'user': 'Hello',
+                                'model': 'Cannot read that page.'
+                            }
+                        ]
+                    }
+                ]
+            }
+            with app.config() as config:
+                self.assertDictEqual(config, expected_config)
+
+    def test_chat_fn_web_search_limit(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ]
+            }))
+        ]
+        tool_call = {'function': {'name': 'web_search', 'arguments': {'query': 'news'}}}
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('threading.Thread'), \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager, \
+             unittest.mock.patch(
+                 'ollama_chat.chat.web_search',
+                 return_value=[{'title': 'Title', 'url': 'http://example.com/', 'snippet': 'Snippet'}]
+             ):
+
+            # Create a mock show response with the tools capability
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': ['tools']}
+
+            # Every chat response asks for another tool call
+            mock_tool_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_tool_response.status = 200
+            mock_tool_response.read_chunked.return_value = [
+                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8')
+            ]
+            mock_final_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_final_response.status = 200
+            mock_final_response.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'Done.'}}).encode('utf-8')
+            ]
+
+            # Configure the mock pool manager instance
+            requests = []
+            mock_pool_manager_instance = mock_pool_manager.return_value
+            mock_pool_manager_instance.request.side_effect = record_requests(
+                [mock_show_response, *[mock_tool_response for _ in range(5)], mock_final_response], requests
+            )
+
+            # Create the ChatManager instance
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            chat_manager = ChatManager(app, 'conv1', ['Hello'], search=True)
+            app.chats['conv1'] = chat_manager
+
+            # Run the thread function
+            ChatManager.chat_thread_fn(chat_manager)
+            self.assertDictEqual(app.chats, {})
+
+            # Verify at most 5 tool call rounds - the last request has no tools
+            chat_calls = [payload for args, payload in requests if args[1].endswith('/api/chat')]
+            self.assertEqual(len(chat_calls), 6)
+            self.assertEqual(sum(1 for payload in chat_calls if 'tools' in payload), 5)
+
+            # Verify the app config
+            with app.config() as config:
+                exchange = config['conversations'][0]['exchanges'][0]
+                self.assertEqual(exchange['model'], 'Done.')
+                self.assertListEqual(exchange['tools'], [{'action': 'search', 'value': 'news'}] * 5)
+
 
 class TestConfigTemplatePrompts(unittest.TestCase):
 
@@ -1530,3 +2018,78 @@ file content
             flags = {}
             with self.assertRaises(FileNotFoundError):
                 _process_commands(None, f'/file {temp_dir}/nonexistent.txt', flags)
+
+
+class TestWebToolCallHelpers(unittest.TestCase):
+
+    def test_tool_call_arguments_dict(self):
+        tool_name, arguments = _tool_call_arguments(
+            {'function': {'name': 'web_search', 'arguments': {'query': 'python news'}}}
+        )
+        self.assertEqual(tool_name, 'web_search')
+        self.assertDictEqual(arguments, {'query': 'python news'})
+
+    def test_tool_call_arguments_json_string(self):
+        tool_name, arguments = _tool_call_arguments(
+            {'function': {'name': 'web_search', 'arguments': '{"query": "python news"}'}}
+        )
+        self.assertEqual(tool_name, 'web_search')
+        self.assertDictEqual(arguments, {'query': 'python news'})
+
+    def test_tool_call_arguments_invalid_json(self):
+        tool_name, arguments = _tool_call_arguments(
+            {'function': {'name': 'web_search', 'arguments': '{query: python news'}}
+        )
+        self.assertEqual(tool_name, 'web_search')
+        self.assertDictEqual(arguments, {})
+
+    def test_tool_call_arguments_not_a_dict(self):
+        tool_name, arguments = _tool_call_arguments(
+            {'function': {'name': 'web_search', 'arguments': ['python news']}}
+        )
+        self.assertEqual(tool_name, 'web_search')
+        self.assertDictEqual(arguments, {})
+
+    def test_tool_call_arguments_missing(self):
+        self.assertTupleEqual(_tool_call_arguments({}), ('', {}))
+        self.assertTupleEqual(_tool_call_arguments({'function': {}}), ('', {}))
+
+    def test_run_tool_unknown(self):
+        with self.assertRaises(ValueError) as raises:
+            _run_tool(None, 'bogus_tool', {})
+        self.assertEqual(str(raises.exception), 'unknown tool "bogus_tool"')
+
+    def test_run_tool_search_missing_query(self):
+        for arguments in ({}, {'query': '   '}):
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError) as raises:
+                _run_tool(None, 'web_search', arguments)
+            self.assertEqual(str(raises.exception), 'missing "query" argument')
+
+    def test_run_tool_search_max_results(self):
+        with unittest.mock.patch(
+            'ollama_chat.chat.web_search', return_value=[{'title': 'T', 'url': 'http://e.com/', 'snippet': 'S'}]
+        ) as mock_web_search:
+            _, event = _run_tool(None, 'web_search', {'query': 'q', 'max_results': 2})
+            mock_web_search.assert_called_once_with('q', max_results=2)
+            self.assertDictEqual(event, {'action': 'search', 'value': 'q'})
+
+    def test_run_tool_search_no_results(self):
+        with unittest.mock.patch('ollama_chat.chat.web_search', return_value=[]) as mock_web_search:
+            text, event = _run_tool(None, 'web_search', {'query': 'nothing here'})
+        mock_web_search.assert_called_once_with('nothing here', max_results=5)
+        self.assertEqual(text, 'No results found for "nothing here"')
+        self.assertDictEqual(event, {'action': 'search', 'value': 'nothing here'})
+
+    def test_run_tool_fetch_page_missing_url(self):
+        with self.assertRaises(ValueError) as raises:
+            _run_tool(None, 'fetch_page', {})
+        self.assertEqual(str(raises.exception), 'missing "url" argument')
+
+    def test_run_tool_fetch_page(self):
+        chat = unittest.mock.Mock()
+        with unittest.mock.patch('ollama_chat.chat.fetch_page', return_value='Page text') as mock_fetch_page:
+            self.assertTupleEqual(
+                _run_tool(chat, 'fetch_page', {'url': 'https://example.com/'}),
+                ('Page text', {'action': 'open', 'value': 'https://example.com/'})
+            )
+        mock_fetch_page.assert_called_once_with('https://example.com/', chat.app.pool_manager)

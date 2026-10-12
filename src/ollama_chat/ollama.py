@@ -42,23 +42,31 @@ def _iter_ndjson(response):
         raise urllib3.exceptions.HTTPError(f'Invalid streamed response: {buffer.strip()!r}')
 
 
-# Call the Ollama chat API and yield each streamed JSON response chunk
-def ollama_chat(pool_manager, model, messages, think=None):
-    # Is this a thinking model?
+# Get an Ollama model's metadata (including its capabilities)
+def ollama_show(pool_manager, model):
     url_show = _get_ollama_url('/api/show')
     data_show = {'model': model}
     response_show = pool_manager.request('POST', url_show, json=data_show, retries=0)
     try:
         if response_show.status != 200:
             raise urllib3.exceptions.HTTPError(f'Unknown model "{model}" ({response_show.status})')
-        model_show = response_show.json()
+        return response_show.json()
     finally:
         response_show.close()
+
+
+# Call the Ollama chat API and yield each streamed JSON response chunk
+def ollama_chat(pool_manager, model, messages, think=None, tools=None, model_show=None):
+    # Is this a thinking model?
+    if model_show is None:
+        model_show = ollama_show(pool_manager, model)
     is_thinking = think if think is not None else ('capabilities' in model_show and 'thinking' in model_show['capabilities'])
 
     # Start a streaming chat request
     url_chat = _get_ollama_url('/api/chat')
     data_chat = {'model': model, 'messages': messages, 'stream': True, 'think': is_thinking}
+    if tools:
+        data_chat['tools'] = tools
     response_chat = pool_manager.request('POST', url_chat, json=data_chat, preload_content=False, retries=0)
     try:
         if response_chat.status != 200:

@@ -50,6 +50,11 @@ const STRINGS = {
     codeLabel: 'code',
     thinkingOn: 'Thinking on',
     thinkingOff: 'Thinking off',
+    webSearchOn: 'Web search on',
+    webSearchOff: 'Web search off',
+    toolsLabel: 'Web tools',
+    toolSearch: 'Search',
+    toolOpen: 'Opened page',
     uploadFile: 'Upload file',
     uploadFilesMax: 'A maximum of 10 files can be attached to a message.',
     uploadFilesType: 'Only txt, md, docx, png, jpg and jpeg files can be attached.',
@@ -78,6 +83,8 @@ const ICONS = {
     download: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>',
     paw: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="10" r="5"/><path d="M8 21v-1a4 4 0 0 1 4-4 4 4 0 0 1 4 4v1"/><path d="M16 7.5V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2.5"/><path d="M4 11.5V9a6 6 0 0 1 6-6h0a6 6 0 0 1 6 6v2.5"/></svg>',
     pawOff: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="10" r="5"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="4" y1="7" x2="20" y2="23"/><path d="M16 7.5V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2.5"/></svg>',
+    globe: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><ellipse cx="12" cy="12" rx="4" ry="9"/></svg>',
+    globeOff: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><ellipse cx="12" cy="12" rx="4" ry="9"/><line x1="4.5" y1="4.5" x2="19.5" y2="19.5"/></svg>',
     upload: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
     clip: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57a4 4 0 1 1 5.66 5.66l-8.58 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
     md: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg>',
@@ -119,6 +126,8 @@ const state = {
     sending: false,
     thinkingOpen: {},
     thinkingEnabled: loadThinkingEnabled(),
+    toolsOpen: {},
+    webSearchEnabled: loadWebSearchEnabled(),
     uploading: false,
     mdViewer: null,
 };
@@ -131,6 +140,16 @@ function loadThinkingEnabled() {
 
 function saveThinkingEnabled(val) {
     try { window.localStorage.setItem('ollama-chat-thinking', String(val)); } catch (err) { /* ignore */ }
+}
+
+function loadWebSearchEnabled() {
+    try {
+        return window.localStorage.getItem('ollama-chat-websearch') === 'true';
+    } catch (err) { return false; }
+}
+
+function saveWebSearchEnabled(val) {
+    try { window.localStorage.setItem('ollama-chat-websearch', String(val)); } catch (err) { /* ignore */ }
 }
 
 function fileExt(name) {
@@ -406,6 +425,39 @@ function renderThinking(exchange, ix, isLast, generating) {
         `</div>`;
 }
 
+/** The web tool call's icon and label (e.g. "Search: python news"). */
+function toolCallIcon(tool) {
+    return tool.action === 'search' ? '🔍' : '🌐';
+}
+
+function toolCallLabel(tool) {
+    const label = tool.action === 'search' ? STRINGS.toolSearch : STRINGS.toolOpen;
+    return `${label}: ${tool.value}`;
+}
+
+function isToolCallsOpen(ix) {
+    if (Object.prototype.hasOwnProperty.call(state.toolsOpen, ix)) {
+        return state.toolsOpen[ix];
+    }
+    return false;
+}
+
+/** Render an exchange's web tool calls as a collapsible block. */
+function renderToolCalls(exchange, ix) {
+    const tools = exchange.tools || [];
+    const open = isToolCallsOpen(ix);
+    const first = tools[0] || {};
+    const label = tools.length === 1 ? toolCallLabel(first) : `${STRINGS.toolsLabel} (${tools.length})`;
+    const rows = tools.map((tool) =>
+        `<div class="tool-call">${toolCallIcon(tool)}<span>${escapeHtml(toolCallLabel(tool))}</span></div>`
+    ).join('');
+    return `<div class="tool-calls">` +
+        `<button type="button" class="tool-calls-head" data-action="tools" data-ix="${ix}" aria-expanded="${open}">` +
+        `${toolCallIcon(first)}<span>${escapeHtml(label)}</span>${ICONS.chevron}</button>` +
+        `<div class="tool-calls-body"${open ? '' : ' hidden'}>${rows}</div>` +
+        `</div>`;
+}
+
 function renderActions(ix, isLast, generating) {
     let html = `<div class="msg-actions">` +
         `<button type="button" class="action-btn" data-action="copy" data-ix="${ix}" ` +
@@ -437,6 +489,9 @@ function renderExchange(exchange, ix, isLast, generating) {
         (exchange.user || !filesHtml ? `<div class="bubble">${escapeHtml(exchange.user)}</div>` : '') + `</div>`;
     if (exchange.thinking) {
         html += renderThinking(exchange, ix, isLast, generating);
+    }
+    if (exchange.tools && exchange.tools.length) {
+        html += renderToolCalls(exchange, ix);
     }
     if (exchange.model) {
         html += `<div class="msg msg-model"><div class="md">${renderMarkdown(exchange.model)}</div>` +
@@ -556,6 +611,7 @@ async function regenerateLastExchange() {
     try {
         await apiPost('regenerateConversationExchange', { id: state.route.id });
         state.thinkingOpen = {};
+        state.toolsOpen = {};
         await loadConversation(state.route.id);
     } catch (err) {
         state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
@@ -570,6 +626,7 @@ async function deleteLastExchange() {
     try {
         await apiPost('deleteConversationExchange', { id: state.route.id });
         state.thinkingOpen = {};
+        state.toolsOpen = {};
         await loadConversation(state.route.id);
     } catch (err) {
         state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
@@ -682,6 +739,8 @@ function buildComposerHtml() {
     const sendIcon = generating ? ICONS.stop : ICONS.up;
     const thinkingIcon = state.thinkingEnabled ? ICONS.paw : ICONS.pawOff;
     const thinkingTitle = state.thinkingEnabled ? STRINGS.thinkingOn : STRINGS.thinkingOff;
+    const webSearchIcon = state.webSearchEnabled ? ICONS.globe : ICONS.globeOff;
+    const webSearchTitle = state.webSearchEnabled ? STRINGS.webSearchOn : STRINGS.webSearchOff;
     return `<textarea id="composer-input" rows="1" placeholder="${escapeHtml(STRINGS.composerPlaceholder)}" ` +
         `aria-label="${escapeHtml(STRINGS.composerPlaceholder)}">${escapeHtml(draft)}</textarea>` +
         (uploadFiles.length ? buildUploadChipsHtml() : '') +
@@ -693,6 +752,8 @@ function buildComposerHtml() {
                 `title="${escapeHtml(STRINGS.selectModel)}"><span class="model-name">${escapeHtml(model || STRINGS.noModels)}</span>${ICONS.chevron}</button>`) +
         buildModelMenuHtml() +
         `</div>` +
+        `<button type="button" class="icon-btn${state.webSearchEnabled ? ' websearch-active' : ''}" id="websearch-btn" data-action="toggleWebSearch" ` +
+        `title="${escapeHtml(webSearchTitle)}" aria-label="${escapeHtml(webSearchTitle)}">${webSearchIcon}</button>` +
         `<button type="button" class="icon-btn${state.thinkingEnabled ? ' thinking-active' : ''}" id="thinking-btn" data-action="toggleThinking" ` +
         `title="${escapeHtml(thinkingTitle)}" aria-label="${escapeHtml(thinkingTitle)}">${thinkingIcon}</button>` +
         `<button type="button" class="icon-btn${uploadFiles.length ? ' upload-active' : ''}" id="upload-btn" data-action="uploadFile" ` +
@@ -834,6 +895,7 @@ async function loadConversation(id) {
     stopPolling();
     state.current = { id, loading: true, error: null, conversation: null, generating: false };
     state.thinkingOpen = {};
+    state.toolsOpen = {};
     render();
     scrollMessagesToBottom();
     try {
@@ -918,7 +980,7 @@ async function submitComposer() {
                 throw new Error(STRINGS.errorNoModel);
             }
             const files = await readFilesAsData(uploadFiles);
-            const data = await apiPost('startConversation', { model, user: text, think: state.thinkingEnabled, files });
+            const data = await apiPost('startConversation', { model, user: text, think: state.thinkingEnabled, search: state.webSearchEnabled, files });
             setDraft('');
             uploadFiles = [];
             state.sending = false;
@@ -926,7 +988,7 @@ async function submitComposer() {
             await refreshConversations();
         } else {
             const files = await readFilesAsData(uploadFiles);
-            await apiPost('replyConversation', { id: state.route.id, user: text, think: state.thinkingEnabled, files });
+            await apiPost('replyConversation', { id: state.route.id, user: text, think: state.thinkingEnabled, search: state.webSearchEnabled, files });
             setDraft('');
             uploadFiles = [];
             state.sending = false;
@@ -1039,6 +1101,7 @@ function onHashChange() {
     state.current = null;
     state.sending = false;
     state.thinkingOpen = {};
+    state.toolsOpen = {};
     document.getElementById('layout')?.classList.remove('sidebar-open');
     render();
     if (state.route.name === 'chat') {
@@ -1088,6 +1151,14 @@ function onRootClick(event) {
             state.thinkingEnabled = !state.thinkingEnabled;
             saveThinkingEnabled(state.thinkingEnabled);
             render();
+        } else if (action === 'toggleWebSearch') {
+            state.webSearchEnabled = !state.webSearchEnabled;
+            saveWebSearchEnabled(state.webSearchEnabled);
+            render();
+        } else if (action === 'tools') {
+            const toolIx = Number(actionButton.dataset.ix);
+            state.toolsOpen[toolIx] = !isToolCallsOpen(toolIx);
+            patchMessages();
         } else if (action === 'uploadFile') {
             document.getElementById('file-input')?.click();
         } else if (action === 'removeFile') {

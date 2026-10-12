@@ -320,7 +320,10 @@ def start_conversation(ctx, req):
         config['conversations'].insert(0, conversation)
 
         # Start the model chat
-        ctx.app.chats[id_] = ChatManager(ctx.app, id_, [user_prompt], think=req.get('think', False), files=req.get('files'))
+        ctx.app.chats[id_] = ChatManager(
+            ctx.app, id_, [user_prompt],
+            think=req.get('think', False), files=req.get('files'), search=req.get('search', False)
+        )
 
         # Return the new conversation identifier
         return {'id': id_}
@@ -359,7 +362,10 @@ def start_template(ctx, req):
         config['conversations'].insert(0, conversation)
 
         # Start the model chat
-        ctx.app.chats[id_] = ChatManager(ctx.app, id_, prompts, think=req.get('think', False), files=req.get('files'))
+        ctx.app.chats[id_] = ChatManager(
+            ctx.app, id_, prompts,
+            think=req.get('think', False), files=req.get('files'), search=req.get('search', False)
+        )
 
         # Return the new conversation identifier
         return {'id': id_}
@@ -414,7 +420,10 @@ def reply_conversation(ctx, req):
             raise chisel.ActionError('ConversationBusy')
 
         # Start the model chat
-        ctx.app.chats[id_] = ChatManager(ctx.app, id_, [req['user']], think=req.get('think', False), files=req.get('files'))
+        ctx.app.chats[id_] = ChatManager(
+            ctx.app, id_, [req['user']],
+            think=req.get('think', False), files=req.get('files'), search=req.get('search', False)
+        )
 
 
 @chisel.action(name='setConversationTitle', types=OLLAMA_CHAT_TYPES)
