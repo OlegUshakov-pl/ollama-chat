@@ -27,6 +27,32 @@ from .web_tools import SEARCH_MAX_RESULTS, WEB_TOOLS, fetch_page, web_search
 _MAX_TOOL_ROUNDS = 5
 
 
+# Model special tokens (e.g. "<|tool_response|>") that some chat templates leak into the streamed text
+_RE_SPECIAL_TOKEN = re.compile(r'<\|[^|<>]{0,64}\|>')
+_RE_SPECIAL_TOKEN_TAIL = re.compile(r'<\|[^|<>]{0,64}$')
+
+
+# Remove model special tokens from streamed text, holding back an incomplete trailing token until the
+# rest of it arrives in a later chunk
+class _StreamTokenFilter():
+    __slots__ = ('tail',)
+
+
+    def __init__(self):
+        self.tail = ''
+
+
+    def add(self, text):
+        text = _RE_SPECIAL_TOKEN.sub('', self.tail + text)
+        match = _RE_SPECIAL_TOKEN_TAIL.search(text)
+        if match:
+            self.tail = match.group(0)
+            text = text[:match.start()]
+        else:
+            self.tail = ''
+        return text
+
+
 # The ollama chat manager class
 class ChatManager():
     __slots__ = ('app', 'conversation_id', 'prompts', 'stop', 'think', 'files', 'search')
@@ -166,6 +192,8 @@ class ChatManager():
                     # Stream this round's response, collecting the model's tool calls
                     round_content = ''
                     tool_calls = []
+                    content_filter = _StreamTokenFilter()
+                    thinking_filter = _StreamTokenFilter()
                     for chunk in ollama_chat(
                         chat.app.pool_manager, model, messages,
                         think=chat.think, tools=request_tools, model_show=model_show
@@ -181,10 +209,11 @@ class ChatManager():
                             if 'thinking' in message:
                                 if 'thinking' not in exchange:
                                     exchange['thinking'] = ''
-                                exchange['thinking'] += message['thinking']
+                                exchange['thinking'] += thinking_filter.add(message['thinking'])
                             if message.get('content'):
-                                exchange['model'] += message['content']
-                                round_content += message['content']
+                                content_text = content_filter.add(message['content'])
+                                exchange['model'] += content_text
+                                round_content += content_text
                             if message.get('tool_calls'):
                                 tool_calls.extend(message['tool_calls'])
                     if chat.stop or not tool_calls or request_tools is None:

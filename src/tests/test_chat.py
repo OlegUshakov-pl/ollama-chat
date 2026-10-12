@@ -15,7 +15,8 @@ import urllib3
 
 from ollama_chat.app import OllamaChat
 from ollama_chat.chat import (
-    _escape_markdown_text, _process_commands, _run_tool, _tool_call_arguments, config_template_prompts, ChatManager
+    _escape_markdown_text, _process_commands, _run_tool, _tool_call_arguments, _StreamTokenFilter,
+    config_template_prompts, ChatManager
 )
 from ollama_chat.web_tools import WEB_TOOLS
 
@@ -1640,6 +1641,52 @@ file content
                 self.assertEqual(exchange['model'], 'Done.')
                 self.assertListEqual(exchange['tools'], [{'action': 'search', 'value': 'news'}] * 5)
 
+    def test_chat_fn_strips_special_tokens(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ]
+            }))
+        ]
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('threading.Thread'), \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+
+            # Create a mock show response
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': ['thinking']}
+
+            # Create a mock chat response leaking special tokens, split across chunks
+            mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response.status = 200
+            mock_chat_response.read_chunked.return_value = [
+                json.dumps({'message': {'thinking': 'Thinking <|tool_response|> now'}}).encode('utf-8'),
+                json.dumps({'message': {'content': 'Hello <|tool'}}).encode('utf-8'),
+                json.dumps({'message': {'content': '_response|> world'}}).encode('utf-8')
+            ]
+
+            # Configure the mock pool manager instance
+            mock_pool_manager_instance = mock_pool_manager.return_value
+            mock_pool_manager_instance.request.side_effect = [mock_show_response, mock_chat_response]
+
+            # Create the ChatManager instance
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            chat_manager = ChatManager(app, 'conv1', ['Hello'], think=True)
+            app.chats['conv1'] = chat_manager
+
+            # Run the thread function
+            ChatManager.chat_thread_fn(chat_manager)
+            self.assertDictEqual(app.chats, {})
+
+            # The special tokens are stripped from both the thinking and the answer text
+            with app.config() as config:
+                exchange = config['conversations'][0]['exchanges'][0]
+                self.assertEqual(exchange['model'], 'Hello  world')
+                self.assertEqual(exchange['thinking'], 'Thinking  now')
+
 
 class TestConfigTemplatePrompts(unittest.TestCase):
 
@@ -2093,3 +2140,30 @@ class TestWebToolCallHelpers(unittest.TestCase):
                 ('Page text', {'action': 'open', 'value': 'https://example.com/'})
             )
         mock_fetch_page.assert_called_once_with('https://example.com/', chat.app.pool_manager)
+
+
+class TestStreamTokenFilter(unittest.TestCase):
+
+    def test_strips_complete_token(self):
+        stream_filter = _StreamTokenFilter()
+        self.assertEqual(stream_filter.add('Hello <|tool_response|> world'), 'Hello  world')
+        self.assertEqual(stream_filter.tail, '')
+
+    def test_strips_token_split_across_chunks(self):
+        stream_filter = _StreamTokenFilter()
+        self.assertEqual(stream_filter.add('Hello <|tool'), 'Hello ')
+        self.assertEqual(stream_filter.tail, '<|tool')
+        self.assertEqual(stream_filter.add('_response|> world'), ' world')
+        self.assertEqual(stream_filter.tail, '')
+
+    def test_holds_unterminated_token(self):
+        stream_filter = _StreamTokenFilter()
+        self.assertEqual(stream_filter.add('text <|weird'), 'text ')
+        self.assertEqual(stream_filter.tail, '<|weird')
+        self.assertEqual(stream_filter.add(' token|>!'), '!')
+        self.assertEqual(stream_filter.tail, '')
+
+    def test_keeps_plain_text(self):
+        stream_filter = _StreamTokenFilter()
+        self.assertEqual(stream_filter.add('a < b || c > d'), 'a < b || c > d')
+        self.assertEqual(stream_filter.tail, '')
