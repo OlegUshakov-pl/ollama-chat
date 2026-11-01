@@ -346,6 +346,18 @@ async function ollamaChatConversationOnTemplate(conversation):
 endfunction
 
 
+# Export PDF on-click event handler - export the conversation as a PDF file on the server
+async function ollamaChatConversationOnExportPdf(args):
+    # Export the PDF
+    pdfResponse = systemFetch({'url': 'exportPdf', 'body': jsonStringify({'id': objectGet(args, 'id')})})
+    pdfResponse = if(pdfResponse != null, jsonParse(pdfResponse))
+    file = if(pdfResponse != null, objectGet(pdfResponse, 'file'))
+    if file != null:
+        markdownPrint('', '**PDF exported to ' + markdownEscape(file) + '**')
+    endif
+endfunction
+
+
 # Prompt on-enter/on-click event handler
 async function ollamaChatConversationOnPrompt(args):
     id = objectGet(args, 'id')
@@ -417,6 +429,7 @@ function ollamaChatConversationFloatingElements(args, conversation, generating):
     deleteClickFn = systemPartial(ollamaChatConversationOnClick, args, 'deleteConversation', indexURL, true)
     templateClickFn = systemPartial(ollamaChatConversationOnTemplate, conversation)
     multilineFn = systemPartial(ollamaChatConversationOnClick, args, null, multilineURL, false)
+    pdfClickFn = systemPartial(ollamaChatConversationOnExportPdf, args)
 
     # Generate the download URL, if necessary
     markdownDownloadURL = null
@@ -484,6 +497,8 @@ function ollamaChatConversationFloatingElements(args, conversation, generating):
                         'attr': {'href': markdownDownloadURL, 'download': markdownFilename}, \
                         'elem': {'text': 'Download'} \
                     }, \
+                    {'text': separator}, \
+                    formsLinkButtonElements('Export PDF', pdfClickFn), \
                     {'text': separator}, \
                     formsLinkButtonElements('Template', templateClickFn), \
                     {'text': separator}, \

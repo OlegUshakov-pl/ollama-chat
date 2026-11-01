@@ -8,6 +8,7 @@ The ollama-chat back-end application
 from contextlib import contextmanager
 import copy
 import ctypes
+import datetime
 import json
 import os
 import pathlib
@@ -23,8 +24,12 @@ import urllib3
 import schema_markdown
 
 from .chat import ChatManager, config_conversation, config_template_prompts
-from .memory import ensure_workspace, workspace_dir
+from .memory import (
+    MEMORY_BACKUP_SUFFIX, MEMORY_FILENAME, USER_MEMORY_FILENAME, daily_file_path, ensure_workspace,
+    memory_file_path, workspace_dir
+)
 from .ollama import ollama_delete, ollama_list, ollama_pull
+from .pdf import conversation_markdown, write_pdf_file
 from .tasks import TaskManager, load_tasks
 
 
@@ -53,6 +58,7 @@ class OllamaChat(chisel.Application):
         self.add_request(delete_model)
         self.add_request(delete_template)
         self.add_request(download_model)
+        self.add_request(export_pdf)
         self.add_request(get_conversation)
         self.add_request(get_conversations)
         self.add_request(get_models)
@@ -438,6 +444,56 @@ def get_conversation(ctx, req):
         return {
             'conversation': conversation
         }
+
+
+# Export a conversation or workspace memory file as PDF, writing it into the workspace's
+# exports directory
+@chisel.action(name='exportPdf', types=OLLAMA_CHAT_TYPES)
+def export_pdf(ctx, req):
+    # The markdown to export and its title, used for the PDF file name
+    id_ = req.get('id')
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+        if id_ is not None:
+            conversation = config_conversation(config, id_)
+            if conversation is None:
+                raise chisel.ActionError('UnknownConversationID')
+            (markdown_text, title) = (conversation_markdown(conversation), conversation['title'])
+        else:
+            (markdown_text, title) = _export_memory_markdown(req, workspace)
+
+    # Write the PDF into the workspace's exports directory
+    path = write_pdf_file(workspace, markdown_text, title)
+    return {'file': str(path)}
+
+
+# The PDF markdown of a workspace memory file - USER.md, MEMORY.md (or backup) or
+# memory/daily/YYYY-MM-DD.md. Returns (markdown text, title), raising UnknownFile otherwise.
+def _export_memory_markdown(req, workspace):
+    file_name = req.get('file')
+    if file_name is None:
+        raise chisel.ActionError('UnknownFile', 'One of "id" or "file" must be specified')
+
+    # Compute the memory file path, validating the file name
+    match = re.fullmatch(r'daily/(\d{4}-\d{2}-\d{2})\.md', file_name)
+    if match:
+        try:
+            date = datetime.date.fromisoformat(match.group(1))
+        except ValueError:
+            raise chisel.ActionError('UnknownFile', f'Unknown memory file "{file_name}"') from None
+        path = daily_file_path(workspace, date)
+    elif file_name in (USER_MEMORY_FILENAME, MEMORY_FILENAME, MEMORY_FILENAME + MEMORY_BACKUP_SUFFIX):
+        path = memory_file_path(workspace, file_name)
+    else:
+        raise chisel.ActionError('UnknownFile', f'Unknown memory file "{file_name}"')
+
+    # The PDF markdown - a file-name heading plus the file content
+    try:
+        with open(path, 'r', encoding='utf-8') as memory_fh:
+            contents = memory_fh.read()
+    except OSError:
+        raise chisel.ActionError('UnknownFile', f'No memory file "{file_name}"') from None
+    return (f'# {file_name}\n\n{contents}', file_name)
 
 
 @chisel.action(name='replyConversation', types=OLLAMA_CHAT_TYPES)

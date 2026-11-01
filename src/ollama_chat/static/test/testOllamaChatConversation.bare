@@ -680,6 +680,8 @@ function testOllamaChatConversationFloatingMenuOpen():
                     {'text': '\u00a0|\u00a0'}, \
                     downloadLink, \
                     {'text': '\u00a0|\u00a0'}, \
+                    formsLinkButtonElements('Export PDF', '<function>'), \
+                    {'text': '\u00a0|\u00a0'}, \
                     formsLinkButtonElements('Template', '<function>'), \
                     {'text': '\u00a0|\u00a0'}, \
                     formsLinkButtonElements('Delete', '<function>') \
@@ -1020,6 +1022,44 @@ unittestRunTest('testOllamaChatConversationOnTemplateNull')
 
 
 #
+# ollamaChatConversationOnExportPdf
+#
+
+
+async function testOllamaChatConversationOnExportPdf():
+    # Export succeeds - print the export path
+    unittestMockAll({'systemFetch': {'exportPdf': jsonStringify({'file': 'exports/conv.pdf'})}})
+    ollamaChatConversationOnExportPdf({'id': 'C1'})
+    unittestDeepEqual(unittestMockEnd(), [ \
+        ['systemFetch', [ \
+            { \
+                'url': 'exportPdf', \
+                'body': '{"id":"C1"}' \
+            } \
+        ]], \
+        ['markdownPrint', ['', '**PDF exported to exports/conv.pdf**']] \
+    ])
+endfunction
+unittestRunTest('testOllamaChatConversationOnExportPdf')
+
+
+async function testOllamaChatConversationOnExportPdfNull():
+    # Export fails - no alert
+    unittestMockAll({})
+    ollamaChatConversationOnExportPdf({'id': 'C1'})
+    unittestDeepEqual(unittestMockEnd(), [ \
+        ['systemFetch', [ \
+            { \
+                'url': 'exportPdf', \
+                'body': '{"id":"C1"}' \
+            } \
+        ]] \
+    ])
+endfunction
+unittestRunTest('testOllamaChatConversationOnExportPdfNull')
+
+
+#
 # ollamaChatConversationOnPrompt
 #
 
@@ -1145,6 +1185,13 @@ async function testOllamaChatConversationMenuButtonBinding():
         ollamaChatTestFindClick(els, 'Template'), \
         systemPartial(ollamaChatConversationOnTemplate, conv), \
         {'systemFetch': {'createTemplate': jsonStringify({'id': 'TID'})}} \
+    )
+
+    # The Export PDF button must export the conversation PDF on the server
+    ollamaChatTestSameEffect( \
+        ollamaChatTestFindClick(els, 'Export PDF'), \
+        systemPartial(ollamaChatConversationOnExportPdf, args), \
+        {'systemFetch': {'exportPdf': jsonStringify({'file': 'exports/conv.pdf'})}} \
     )
 
     systemGlobalSet('vMenu', null)

@@ -209,6 +209,25 @@ Every day at 9:00 — briefing from memory and fresh news on a topic (Russian):
 ```
 The report is saved to `memory/daily/YYYY-MM-DD.md` as `## Утренний брифинг (09:00)`.
 
+### PDF export
+The **Export PDF** button (next to **Download** in the conversation menu) renders the current
+conversation as a PDF file on the server and saves it to `<workspace>/exports/`. A note appears at
+the bottom of the page with the exported file path, e.g. `PDF exported to
+ollama-chat-workspace/exports/conversation-1.pdf`. A duplicate title gets a numbered file name
+(`…-1.pdf`, `…-2.pdf`).
+
+Rendering is done with [fpdf2](https://github.com/py-pdf/fpdf2) (pure Python — no GTK, WeasyPrint
+or other heavy Windows dependencies) and the bundled DejaVu fonts, so **Cyrillic and Latin-2
+(Polish) letters are supported**: headings, lists, tables, monospace code blocks and quotes are
+formatted. Workspace memory files can be exported through the API too:
+
+```
+POST /exportPdf  {"id": "<conversation id>"}     # a conversation
+POST /exportPdf  {"file": "USER.md"}             # <workspace>/memory/USER.md
+POST /exportPdf  {"file": "MEMORY.md"}           # <workspace>/memory/MEMORY.md
+POST /exportPdf  {"file": "daily/2026-01-15.md"} # <workspace>/memory/daily/YYYY-MM-DD.md
+```
+
 ## Add a desktop launcher
 
 **macOS** — drag `ollama-chat` executable to Dock.
@@ -233,7 +252,7 @@ nano $HOME/.local/share/applications/ollama-chat.desktop
 
 [Ollama Chat File Format](https://craigahobbs.github.io/ollama-chat/api.html#var.vName='OllamaChatConfig')
 [Ollama Chat API](https://craigahobbs.github.io/ollama-chat/api.html)
-Schema: `src/ollama_chat/static/ollamaChat.smd` — fork adds `think`/`files`/`search` to `StartConversation`/`ReplyConversation`/`StartTemplate`, `tools` to `ConversationExchange`, `tasks`/`TaskInfo` to `getConversations`, and `workspace`/`memoryLimit`/`tasksCatchUp` to `OllamaChatConfig` plus the `setWorkspace` endpoint.
+Schema: `src/ollama_chat/static/ollamaChat.smd` — fork adds `think`/`files`/`search` to `StartConversation`/`ReplyConversation`/`StartTemplate`, `tools` to `ConversationExchange`, `tasks`/`TaskInfo` to `getConversations`, `workspace`/`memoryLimit`/`tasksCatchUp` to `OllamaChatConfig` plus the `setWorkspace` endpoint, and the `exportPdf` endpoint.
 
 ## Development
 

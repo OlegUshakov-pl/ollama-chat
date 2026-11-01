@@ -41,6 +41,7 @@ class TestApp(unittest.TestCase):
                     'deleteModel',
                     'deleteTemplate',
                     'downloadModel',
+                    'exportPdf',
                     'getConversation',
                     'getConversations',
                     'getModels',
@@ -89,6 +90,7 @@ class TestApp(unittest.TestCase):
                     'deleteModel',
                     'deleteTemplate',
                     'downloadModel',
+                    'exportPdf',
                     'getConversation',
                     'getConversations',
                     'getModels',
@@ -1849,6 +1851,96 @@ class TestAPI(unittest.TestCase):
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
                 self.assertEqual(json.load(config_fh), original_config)
+
+
+    def test_export_pdf_conversation(self):
+        original_config = {
+            'conversations': [
+                {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': [{'user': 'Hello', 'model': 'Привет, мир! Zażółć gęślą jaźń'}]}
+            ]
+        }
+        test_files = [
+            ('ollama-chat.json', json.dumps(original_config))
+        ]
+        with create_test_files(test_files) as temp_dir, \
+              unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            # Export conversation 'conv1' as PDF
+            status, headers, content_bytes = app.request('POST', '/exportPdf', wsgi_input=json.dumps({'id': 'conv1'}).encode('utf-8'))
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertListEqual(headers, [('Content-Type', 'application/json')])
+            self.assertDictEqual(response, {'file': os.path.join(temp_dir, 'exports', 'conversation-1.pdf')})
+
+            # Exported PDF
+            with open(response['file'], 'rb') as pdf_fh:
+                self.assertTrue(pdf_fh.read().startswith(b'%PDF'))
+
+
+    def test_export_pdf_conversation_unknown_id(self):
+        with create_test_files([]) as temp_dir, \
+              unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            # Try to export a non-existent conversation
+            status, headers, content_bytes = app.request('POST', '/exportPdf', wsgi_input=json.dumps({'id': 'conv2'}).encode('utf-8'))
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            self.assertListEqual(headers, [('Content-Type', 'application/json')])
+            self.assertDictEqual(response, {'error': 'UnknownConversationID'})
+
+
+    def test_export_pdf_memory_file(self):
+        test_files = [
+            (['memory', 'USER.md'], '# About me\n\nПривет, мир! Zażółć gęślą jaźń.'),
+            (['memory', 'MEMORY.md'], '- Note 1\n- Note 2'),
+            (['memory', 'daily', '2026-01-15.md'], '## Утренний брифинг (09:00)\n\nNote A'),
+            ('ollama-chat.json', json.dumps({'conversations': []}))
+        ]
+        with create_test_files(test_files) as temp_dir, \
+              unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            # Export each memory file as PDF
+            pdf_files = [
+                ('USER.md', 'user-md.pdf'),
+                ('MEMORY.md', 'memory-md.pdf'),
+                ('daily/2026-01-15.md', 'daily-2026-01-15-md.pdf')
+            ]
+            for file_name, pdf_filename in pdf_files:
+                status, headers, content_bytes = app.request( \
+                    'POST', '/exportPdf', wsgi_input=json.dumps({'file': file_name}).encode('utf-8') \
+                )
+                response = json.loads(content_bytes.decode('utf-8'))
+                self.assertEqual(status, '200 OK')
+                self.assertListEqual(headers, [('Content-Type', 'application/json')])
+                self.assertEqual(response['file'], os.path.join(temp_dir, 'exports', pdf_filename))
+                with open(response['file'], 'rb') as pdf_fh:
+                    self.assertTrue(pdf_fh.read().startswith(b'%PDF'))
+
+
+    def test_export_pdf_unknown_file(self):
+        with create_test_files([]) as temp_dir, \
+              unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            # Unknown memory file, bad date, and no ID or file
+            for request_body, message in [
+                ({'file': 'SECRET.md'}, 'Unknown memory file "SECRET.md"'),
+                ({'file': 'daily/2026-13-01.md'}, 'Unknown memory file "daily/2026-13-01.md"'),
+                ({}, 'One of "id" or "file" must be specified')
+            ]:
+                status, headers, content_bytes = app.request('POST', '/exportPdf', wsgi_input=json.dumps(request_body).encode('utf-8'))
+                response = json.loads(content_bytes.decode('utf-8'))
+                self.assertEqual(status, '400 Bad Request')
+                self.assertListEqual(headers, [('Content-Type', 'application/json')])
+                # Note: memory-file paths outside memory/ are rejected by the daily/ regex
+                self.assertEqual(response, {'error': 'UnknownFile', 'message': message})
 
 
     def test_reply_conversation_success(self):

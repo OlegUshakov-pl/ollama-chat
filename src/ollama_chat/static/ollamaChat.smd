@@ -577,6 +577,28 @@ action regenerateConversationExchange
         UnknownConversationID
 
 
+# Export a conversation or workspace memory file as PDF, saved into the workspace's exports
+# directory
+action exportPdf
+    urls
+        POST
+
+    input
+        # The conversation identifier, for a conversation export
+        optional string id
+
+        # The workspace memory file - "USER.md", "MEMORY.md" or "daily/YYYY-MM-DD.md"
+        optional string file
+
+    output
+        # The exported PDF file path
+        string file
+
+    errors
+        UnknownConversationID
+        UnknownFile
+
+
 # Get the available models
 action getModels
     urls
