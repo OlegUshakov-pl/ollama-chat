@@ -56,7 +56,7 @@ def ollama_show(pool_manager, model):
 
 
 # Call the Ollama chat API and yield each streamed JSON response chunk
-def ollama_chat(pool_manager, model, messages, think=None, tools=None, model_show=None):
+def ollama_chat(pool_manager, model, messages, think=None, tools=None, model_show=None, num_ctx=None):
     # Is this a thinking model?
     if model_show is None:
         model_show = ollama_show(pool_manager, model)
@@ -67,6 +67,8 @@ def ollama_chat(pool_manager, model, messages, think=None, tools=None, model_sho
     data_chat = {'model': model, 'messages': messages, 'stream': True, 'think': is_thinking}
     if tools:
         data_chat['tools'] = tools
+    if num_ctx is not None:
+        data_chat['options'] = {'num_ctx': num_ctx}
     response_chat = pool_manager.request('POST', url_chat, json=data_chat, preload_content=False, retries=0)
     try:
         if response_chat.status != 200:

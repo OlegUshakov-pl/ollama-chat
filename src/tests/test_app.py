@@ -310,7 +310,7 @@ class TestAPI(unittest.TestCase):
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertEqual(status, '200 OK')
             self.assertListEqual(headers, [('Content-Type', 'application/json'), ('Access-Control-Allow-Origin', '*')])
-            self.assertDictEqual(response, {'workspace': temp_dir, 'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': temp_dir, 'conversations': [], 'templates': [], 'tasks': []})
 
             # Verify the app config
             with app.config() as config:
@@ -335,7 +335,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             self.assertDictEqual( \
                 response, \
-                {'workspace': temp_dir, 'model': 'llm', 'conversations': [], 'templates': []} \
+                {'workspace': temp_dir, 'model': 'llm', 'conversations': [], 'templates': [], 'tasks': []} \
             )
 
             # Verify the app config
@@ -358,7 +358,7 @@ class TestAPI(unittest.TestCase):
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertEqual(status, '200 OK')
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
-            self.assertDictEqual(response, {'workspace': temp_dir, 'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': temp_dir, 'conversations': [], 'templates': [], 'tasks': []})
 
             # Verify the app config
             with app.config() as config:

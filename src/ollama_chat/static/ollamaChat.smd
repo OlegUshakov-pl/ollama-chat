@@ -18,6 +18,31 @@ struct ConversationInfo
     string title
 
 
+# A scheduled task's info
+struct TaskInfo
+
+    # The task identifier
+    string id
+
+    # The task name
+    string name
+
+    # The daily run time, "HH:MM"
+    string time
+
+    # The run days - ISO weekdays, Monday is 1 and Sunday is 7
+    int[] days
+
+    # The model ID
+    string model
+
+    # The task's last run time, or null
+    optional string lastRun
+
+    # The task's last error message, or null
+    optional string lastError
+
+
 # The user-model conversation info with generating status
 struct ConversationInfoEx (ConversationInfo)
 
@@ -181,6 +206,9 @@ struct OllamaChatConfig
     # The workspace memory character limit (default is 3000)
     optional int memoryLimit
 
+    # If true, run tasks missed within the last 24 hours at application start (default is true)
+    optional bool tasksCatchUp
+
     # If true, don't save the config file
     optional bool noSave
 
@@ -253,6 +281,9 @@ action getConversations
 
         # The workspace directory
         string workspace
+
+        # The scheduled tasks
+        TaskInfo[] tasks
 
 
 # Set the workspace directory

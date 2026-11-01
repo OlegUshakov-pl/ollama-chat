@@ -372,7 +372,7 @@ def _process_commands(chat, prompt, flags, config=None):
     # Process the commands
     return _R_COMMAND.sub(functools.partial(_process_commands_sub, chat, flags, False, config), prompt)
 
-_R_COMMAND = re.compile(r'^/(?P<cmd>\?|dir|do|file|forget|image|memory|remember|url)(?P<args> .*)?$', re.MULTILINE)
+_R_COMMAND = re.compile(r'^/(?P<cmd>\?|dir|do|file|forget|image|memory|remember|task|tasks|url)(?P<args> .*)?$', re.MULTILINE)
 
 
 # Command prompt regex substitution function
@@ -432,6 +432,53 @@ def _process_commands_sub(chat, flags, scan, config, match):
                     'Confirm deletion with `/forget -y <phrase>`.'
             else:
                 flags['reply'] = f'No memory lines match "{phrase}".'
+        return ''
+
+    # List scheduled tasks?
+    if command == 'tasks' or command == 'task' and args.taskAction == 'list':
+        # Imported inline to avoid a circular import with the tasks module
+        from .tasks import load_tasks, tasks_summary  # pylint: disable=import-outside-toplevel
+        flags['reply'] = tasks_summary(load_tasks(workspace_dir(config)))
+        return ''
+
+    # Run a task now?
+    if command == 'task' and args.taskAction == 'run':
+        # Imported inline to avoid a circular import with the tasks module
+        from .tasks import load_tasks  # pylint: disable=import-outside-toplevel
+        workspace = workspace_dir(config)
+        if not any(task.get('id') == args.id for task in load_tasks(workspace)):
+            raise ValueError(f'No task "{args.id}"')
+        threading.Thread(target=chat.app.tasks.run_task_by_id, args=(args.id,), daemon=True).start()
+        flags['reply'] = \
+            f'Running task "{args.id}" now. The report is appended to memory/daily in the workspace.'
+        return ''
+
+    # Add a scheduled task?
+    if command == 'task' and args.taskAction == 'add':
+        # Imported inline to avoid a circular import with the tasks module
+        from .tasks import parse_task_days, parse_task_time, task_add, task_days_text  # pylint: disable=import-outside-toplevel
+        run_time = parse_task_time(args.time)
+        days = parse_task_days(args.days)
+        model = args.model or config.get('model')
+        if not model:
+            raise ValueError('no current model - specify a model with "-m"')
+        task_id = task_add( \
+            workspace_dir(config), args.name, run_time, days, ' '.join(args.prompt), model, \
+            num_ctx=args.ctx, tools=args.tools.split(',') if args.tools else None \
+        )
+        if chat is not None:
+            chat.app.tasks.start()
+        flags['reply'] = \
+            f'Added task "{task_id}" - "{args.name}" at {args.time}, {task_days_text(days)}, model {model}.\n' \
+            'Use /tasks to list tasks, /task run "' + task_id + '" to run it now.'
+        return ''
+
+    # Remove a scheduled task?
+    if command == 'task' and args.taskAction == 'remove':
+        # Imported inline to avoid a circular import with the tasks module
+        from .tasks import task_remove  # pylint: disable=import-outside-toplevel
+        task_remove(workspace_dir(config), args.id)
+        flags['reply'] = f'Removed task "{args.id}".'
         return ''
 
     # Include files from a directory?
@@ -580,6 +627,36 @@ _COMMAND_PARSER_MEMORY.add_argument('-h', dest='help', action=CommandHelpAction,
 _COMMAND_PARSER_REMEMBER = _COMMAND_SUBPARSERS.add_parser('remember', add_help=False, exit_on_error=False, help='add a line to memory')
 _COMMAND_PARSER_REMEMBER.add_argument('text', nargs='+', metavar='TEXT', help='the text to remember')
 _COMMAND_PARSER_REMEMBER.add_argument('-h', dest='help', action=CommandHelpAction, help='show help')
+_COMMAND_PARSER_TASKS = _COMMAND_SUBPARSERS.add_parser( \
+    'tasks', add_help=False, exit_on_error=False, help='list scheduled tasks' \
+)
+_COMMAND_PARSER_TASKS.add_argument('-h', dest='help', action=CommandHelpAction, help='show help')
+_COMMAND_PARSER_TASK = _COMMAND_SUBPARSERS.add_parser( \
+    'task', add_help=False, exit_on_error=False, help='scheduled task management' \
+)
+_COMMAND_PARSER_TASK.add_argument('-h', dest='help', action=CommandHelpAction, help='show help')
+_TASK_SUBPARSERS = _COMMAND_PARSER_TASK.add_subparsers(dest='taskAction')
+_TASK_PARSER_ADD = _TASK_SUBPARSERS.add_parser('add', add_help=False, exit_on_error=False, help='add a scheduled task')
+_TASK_PARSER_ADD.add_argument('name', help='the task name')
+_TASK_PARSER_ADD.add_argument('prompt', nargs='+', metavar='PROMPT', help="the task's prompt")
+_TASK_PARSER_ADD.add_argument('-d', dest='days', metavar='DAYS', default='all', \
+    help="the days to run ('all', 'weekdays', 'weekends', or '1,3,5' - Monday is 1)")
+_TASK_PARSER_ADD.add_argument('--ctx', dest='ctx', metavar='N', type=int, help='the model num_ctx option')
+_TASK_PARSER_ADD.add_argument('-h', dest='help', action=CommandHelpAction, help='show help')
+_TASK_PARSER_ADD.add_argument('-m', dest='model', metavar='MODEL', help='the model ID (default is the current model)')
+_TASK_PARSER_ADD.add_argument('-t', dest='time', metavar='HH:MM', required=True, help='the daily run time')
+_TASK_PARSER_ADD.add_argument( \
+    '--tools', dest='tools', metavar='NAME[,NAME...]', \
+    help='allowed tool names, comma-separated (default is "web_search,fetch_page")' \
+)
+_TASK_PARSER_LIST = _TASK_SUBPARSERS.add_parser('list', add_help=False, exit_on_error=False, help='list scheduled tasks')
+_TASK_PARSER_LIST.add_argument('-h', dest='help', action=CommandHelpAction, help='show help')
+_TASK_PARSER_REMOVE = _TASK_SUBPARSERS.add_parser('remove', add_help=False, exit_on_error=False, help='remove a scheduled task')
+_TASK_PARSER_REMOVE.add_argument('id', metavar='ID', help='the task ID')
+_TASK_PARSER_REMOVE.add_argument('-h', dest='help', action=CommandHelpAction, help='show help')
+_TASK_PARSER_RUN = _TASK_SUBPARSERS.add_parser('run', add_help=False, exit_on_error=False, help='run a scheduled task now')
+_TASK_PARSER_RUN.add_argument('id', metavar='ID', help='the task ID')
+_TASK_PARSER_RUN.add_argument('-h', dest='help', action=CommandHelpAction, help='show help')
 
 
 # Helper to produce file text content

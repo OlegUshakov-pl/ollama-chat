@@ -7,6 +7,7 @@ import io
 import json
 import os
 import pathlib
+import types
 import unittest
 import unittest.mock
 
@@ -19,9 +20,25 @@ from ollama_chat.chat import (
     config_template_prompts, ChatManager
 )
 from ollama_chat.memory import memory_context
+from ollama_chat.tasks import load_tasks
 from ollama_chat.web_tools import WEB_TOOLS
 
 from .util import create_test_files
+
+
+TEST_TASK = {
+    'id': 'briefing',
+    'name': 'Briefing',
+    'time': '09:00',
+    'days': [1, 2, 3, 4, 5, 6, 7],
+    'prompt': 'Make a report',
+    'model': 'llm',
+    'num_ctx': None,
+    'tools': ['web_search', 'fetch_page'],
+    'dest': 'daily',
+    'lastRun': None,
+    'lastError': None
+}
 
 
 # Helper pool manager request side effect recording each call's payload. The payloads are copied
@@ -1101,7 +1118,7 @@ class TestChatManager(unittest.TestCase):
             }
             with app.config() as config:
                 exchange = config['conversations'][0]['exchanges'][0]
-                self.assertTrue(exchange['model'].startswith('```\nusage: /{?,dir,do,file,image,url,forget,memory,remember}'))
+                self.assertTrue(exchange['model'].startswith('```\nusage: /{?,dir,do,file,image,url,forget,memory,remember,tasks,task}'))
                 del exchange['model']
                 self.assertDictEqual(config, expected_config)
 
@@ -1109,7 +1126,7 @@ class TestChatManager(unittest.TestCase):
             with open(config_path, 'r', encoding='utf-8') as config_fh:
                 config = json.load(config_fh)
                 exchange = config['conversations'][0]['exchanges'][0]
-                self.assertTrue(exchange['model'].startswith('```\nusage: /{?,dir,do,file,image,url,forget,memory,remember}'))
+                self.assertTrue(exchange['model'].startswith('```\nusage: /{?,dir,do,file,image,url,forget,memory,remember,tasks,task}'))
                 del exchange['model']
                 self.assertEqual(config, expected_config)
 
@@ -1831,7 +1848,7 @@ class TestProcessCommands(unittest.TestCase):
     def test_help_top(self):
         flags = {}
         self.assertEqual(_process_commands(None, '/?', flags), 'Displaying top-level help')
-        self.assertTrue(flags['help'].startswith('usage: /{?,dir,do,file,image,url,forget,memory,remember}'))
+        self.assertTrue(flags['help'].startswith('usage: /{?,dir,do,file,image,url,forget,memory,remember,tasks,task}'))
 
 
     def test_memory_help(self):
@@ -1896,6 +1913,82 @@ class TestProcessCommands(unittest.TestCase):
             # The line is deleted
             with open(os.path.join(temp_dir, 'memory', 'MEMORY.md'), 'r', encoding='utf-8') as memory_file:
                 self.assertNotIn('tea', memory_file.read())
+
+
+    def test_tasks_empty(self):
+        with create_test_files([]) as temp_dir:
+            flags = {}
+            self.assertEqual(_process_commands(None, '/tasks', flags, {'workspace': temp_dir}), '')
+            self.assertDictEqual(flags, {'reply': 'There are no scheduled tasks.'})
+
+            # /task list is the same thing
+            flags = {}
+            self.assertEqual(_process_commands(None, '/task list', flags, {'workspace': temp_dir}), '')
+            self.assertDictEqual(flags, {'reply': 'There are no scheduled tasks.'})
+
+
+    def test_tasks_list(self):
+        test_files = [('tasks.json', json.dumps([TEST_TASK]))]
+        with create_test_files(test_files) as temp_dir:
+            flags = {}
+            self.assertEqual(_process_commands(None, '/tasks', flags, {'workspace': temp_dir}), '')
+            self.assertIn('1. briefing - "Briefing" - 09:00 every day - model llm', flags['reply'])
+
+
+    def test_task_add(self):
+        with create_test_files([]) as temp_dir:
+            flags = {}
+            prompt = '/task add "Briefing" -t 09:00 -d weekdays News about AI daily'
+            self.assertEqual(_process_commands(None, prompt, flags, {'workspace': temp_dir, 'model': 'llm'}), '')
+            self.assertIn('Added task "briefing" - "Briefing" at 09:00', flags['reply'])
+            self.assertIn('Mon, Tue, Wed, Thu, Fri', flags['reply'])
+
+            # The task is in the task file
+            tasks = load_tasks(temp_dir)
+            self.assertEqual(tasks[0]['id'], 'briefing')
+            self.assertEqual(tasks[0]['model'], 'llm')
+            self.assertListEqual(tasks[0]['days'], [1, 2, 3, 4, 5])
+
+
+    def test_task_remove(self):
+        test_files = [('tasks.json', json.dumps([TEST_TASK]))]
+        with create_test_files(test_files) as temp_dir:
+            flags = {}
+            self.assertEqual( \
+                _process_commands(None, '/task remove briefing', flags, {'workspace': temp_dir}), '' \
+            )
+            self.assertDictEqual(flags, {'reply': 'Removed task "briefing".'})
+            self.assertEqual(load_tasks(temp_dir), [])
+
+            # An unknown task ID is an error
+            flags = {}
+            with self.assertRaises(ValueError):
+                _process_commands(None, '/task remove briefing', flags, {'workspace': temp_dir})
+
+
+    def test_task_run_unknown(self):
+        with create_test_files([]) as temp_dir:
+            flags = {}
+            with self.assertRaises(ValueError):
+                _process_commands(None, '/task run no-such-task', flags, {'workspace': temp_dir})
+
+
+    def test_task_run(self):
+        test_files = [('tasks.json', json.dumps([TEST_TASK]))]
+        with create_test_files(test_files) as temp_dir:
+            ran_ids = []
+            chat = types.SimpleNamespace( \
+                app=types.SimpleNamespace(tasks=types.SimpleNamespace(run_task_by_id=ran_ids.append)) \
+            )
+            flags = {}
+            with unittest.mock.patch('threading.Thread') as mock_thread:
+                self.assertEqual( \
+                    _process_commands(chat, '/task run briefing', flags, {'workspace': temp_dir}), '' \
+                )
+            mock_thread.assert_called_once_with( \
+                target=chat.app.tasks.run_task_by_id, args=('briefing',), daemon=True \
+            )
+            self.assertIn('Running task "briefing" now.', flags['reply'])
 
 
     def test_help(self):

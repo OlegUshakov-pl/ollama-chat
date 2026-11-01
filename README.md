@@ -84,8 +84,9 @@ ollama-chat -t askAristotle -v question "Why is the sky blue?"
 - **File uploads** — up to 10 files per message (`txt`/`md`/`docx` as text, `png`/`jpg`/`jpeg` as images)
 - **Markdown viewer** — open local `.md` files in chat area, rendered safely
 - **Rename / Delete / Download .md / Regenerate** per chat
-- Prompt commands `/file`, `/dir`, `/image`, `/url`, `/memory`, `/remember`, `/forget`, `/do`, `/?`
+- Prompt commands `/file`, `/dir`, `/image`, `/url`, `/memory`, `/remember`, `/forget`, `/do`, `/?`, `/tasks`, `/task`
 - **Workspace memory** (`USER.md` + `MEMORY.md`) injected into every model turn
+- **Scheduled tasks** (cron) — daily/weekly reports run by the in-app scheduler or Windows Task Scheduler, saved to workspace memory
 - Conversation templates with `{{var}}` substitution
 - Model browser, download, monitor, selection, streaming
 - Show/hide thinking, Markdown/text view, export as Markdown
@@ -165,6 +166,49 @@ Usage examples:
 - **Run:** click title on home; if variables `{{var}}`, prompts for values then creates conversation
 - **Edit:** home → `Select` → `Edit` (title, name, variables, prompts)
 
+### Scheduled tasks
+Tasks run a prompt on a schedule (like cron) without a conversation: they read the workspace memory,
+may use the web tools (`web_search`, `fetch_page`), generate a report with the same tool-calling loop
+as a chat, and **append the report to `<workspace>/memory/daily/YYYY-MM-DD.md`** with the task name
+and time as the heading. Errors never crash the scheduler — they are logged to
+`<workspace>/logs/YYYY-MM-DD.log` and shown in `/tasks` and on the home page.
+
+Tasks are stored in `<workspace>/tasks.json` — each task has `id` (unique, derived from the name),
+`name`, `time` (`HH:MM`), `days` (ISO weekdays `1=Mon`…`7=Sun`), `prompt`, `model`, `num_ctx`,
+`tools` (read-only tools only), `dest`, plus the `lastRun`/`lastError` maintenance fields.
+
+**Managing tasks** — prompt commands or the **Tasks** list on the home page:
+
+```
+/tasks                                   # list tasks (same as /task list)
+/task add "Morning briefing" -t 09:00 -d weekdays -m llama3.1 Make a briefing of my memory and the news about AI
+/task add name -t HH:MM [-d all|weekdays|weekends|1,3,5] [--ctx N] [--tools web_search,fetch_page] prompt...
+/task run briefing                        # run the task once now
+/task remove briefing
+```
+
+Default `-d` is `all`. Default `--tools` is `web_search,fetch_page`; write tools (`send_email`, …)
+are never allowed in tasks. The default model is the current model. If the time-slot is skipped
+(app off), the task is missed-catch-up run at startup when the config key `tasksCatchUp` is not
+`false`.
+
+**Running tasks with the Windows Task Scheduler** — the `run_task.py` script runs one task and
+exits, so the app doesn't need to be running:
+```
+schtasks /Create /TN "Ollama Briefing" /SC DAILY /ST 09:00 ^
+  /TR "python D:\path\to\run_task.py briefing" /SC DAILY
+python run_task.py -c "%USERPROFILE%\ollama-chat.json" briefing
+```
+The script prints the report to stdout, exits with code 0 on success and 1 on failure (the failure
+is also logged to the workspace `logs` directory).
+
+### Scheduled task example
+Every day at 9:00 — briefing from memory and fresh news on a topic (Russian):
+```
+/task add "Утренний брифинг" -t 09:00 -d weekdays Прочитай мою память и найди свежие новости по теме ИИ. Сделай краткий брифинг: что важно сегодня.
+```
+The report is saved to `memory/daily/YYYY-MM-DD.md` as `## Утренний брифинг (09:00)`.
+
 ## Add a desktop launcher
 
 **macOS** — drag `ollama-chat` executable to Dock.
@@ -189,7 +233,7 @@ nano $HOME/.local/share/applications/ollama-chat.desktop
 
 [Ollama Chat File Format](https://craigahobbs.github.io/ollama-chat/api.html#var.vName='OllamaChatConfig')
 [Ollama Chat API](https://craigahobbs.github.io/ollama-chat/api.html)
-Schema: `src/ollama_chat/static/ollamaChat.smd` — fork adds `think`/`files`/`search` to `StartConversation`/`ReplyConversation`/`StartTemplate`, `tools` to `ConversationExchange`, and `workspace`/`memoryLimit` to `OllamaChatConfig` plus the `setWorkspace` endpoint.
+Schema: `src/ollama_chat/static/ollamaChat.smd` — fork adds `think`/`files`/`search` to `StartConversation`/`ReplyConversation`/`StartTemplate`, `tools` to `ConversationExchange`, `tasks`/`TaskInfo` to `getConversations`, and `workspace`/`memoryLimit`/`tasksCatchUp` to `OllamaChatConfig` plus the `setWorkspace` endpoint.
 
 ## Development
 

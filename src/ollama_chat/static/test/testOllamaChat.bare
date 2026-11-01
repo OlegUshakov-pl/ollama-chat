@@ -27,6 +27,7 @@ async function testOllamaChatIndex():
     unittestMockAll({ \
         'systemFetch': { \
             'getConversations': jsonStringify({ \
+            'tasks': [], \
                 'model': 'llm:7b', \
                 'conversations': [ \
                     {'id': 'ID', 'model': 'llm:7b', 'title': 'Hello', 'generating': false} \
@@ -69,6 +70,8 @@ async function testOllamaChatIndex():
         ]], \
         ['markdownPrint', ['','## Workspace']], \
         ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
+['markdownPrint', ['', '## Tasks']], \
+        ['markdownPrint', ['', '\u00a0\u00a0\u00a0\u00a0' + '*No tasks*']], \
         ['markdownPrint', ['','## Conversations']], \
         ['elementModelRender', [ \
             [ \
@@ -167,6 +170,7 @@ async function testOllamaChatIndexWorkspaceForm():
     systemGlobalSet('vAction', 'workspace')
     args = argsParse(ollamaChatArguments)
     unittestMockAll({'systemFetch': {'getConversations': jsonStringify({ \
+    'tasks': [], \
         'model': 'm:1', 'workspace': 'C:\\ws', 'conversations': [], 'templates': [] \
     })}})
     ollamaChatIndexPage(args)
@@ -201,6 +205,8 @@ async function testOllamaChatIndexWorkspaceForm():
             ] \
         ]], \
         ['documentSetFocus', ['ollama-chat-workspace-input']], \
+['markdownPrint', ['', '## Tasks']], \
+        ['markdownPrint', ['', '\u00a0\u00a0\u00a0\u00a0' + '*No tasks*']], \
         ['markdownPrint', ['','## Conversations']], \
         ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
         ['markdownPrint', ['','## Templates']], \
@@ -248,6 +254,7 @@ async function testOllamaChatIndexWorkspaceBinding():
     args = argsParse(ollamaChatArguments)
     render = systemPartial(ollamaChatIndexPage, args)
     data = {'systemFetch': {'getConversations': jsonStringify({ \
+    'tasks': [], \
         'model': 'm:1', 'workspace': 'C:\\ws', 'conversations': [], 'templates': [] \
     })}}
     ollamaChatTestVerifyClick(render, 'Update', ollamaChatIndexOnWorkspace, data)
@@ -280,7 +287,7 @@ unittestRunTest('testOllamaChatIndexOnConversationActionDelete')
 async function testOllamaChatIndexOnConversationActionMove():
     # Non-delete actions move the conversation then re-render the index page
     args = argsParse(ollamaChatArguments)
-    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({'model': 'm:1', 'conversations': [], 'templates': []})}})
+    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({ 'tasks': [], 'model': 'm:1', 'conversations': [], 'templates': []})}})
     ollamaChatIndexOnConversationAction(args, 'C1', 'down')
     unittestDeepEqual(unittestMockEnd(), [ \
         ['systemFetch', [ \
@@ -296,6 +303,8 @@ async function testOllamaChatIndexOnConversationActionMove():
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
         ['markdownPrint', ['','## Workspace']], \
         ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
+['markdownPrint', ['', '## Tasks']], \
+        ['markdownPrint', ['', '\u00a0\u00a0\u00a0\u00a0' + '*No tasks*']], \
         ['markdownPrint', ['','## Conversations']], \
         ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
         ['markdownPrint', ['','## Templates']], \
@@ -329,7 +338,7 @@ unittestRunTest('testOllamaChatIndexOnTemplateActionDelete')
 async function testOllamaChatIndexOnTemplateActionMove():
     # Non-delete actions move the template then re-render the index page
     args = argsParse(ollamaChatArguments)
-    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({'model': 'm:1', 'conversations': [], 'templates': []})}})
+    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({ 'tasks': [], 'model': 'm:1', 'conversations': [], 'templates': []})}})
     ollamaChatIndexOnTemplateAction(args, 'T1', 'up')
     unittestDeepEqual(unittestMockEnd(), [ \
         ['systemFetch', [ \
@@ -345,6 +354,8 @@ async function testOllamaChatIndexOnTemplateActionMove():
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
         ['markdownPrint', ['','## Workspace']], \
         ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
+['markdownPrint', ['', '## Tasks']], \
+        ['markdownPrint', ['', '\u00a0\u00a0\u00a0\u00a0' + '*No tasks*']], \
         ['markdownPrint', ['','## Conversations']], \
         ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
         ['markdownPrint', ['','## Templates']], \
@@ -439,7 +450,7 @@ unittestRunTest('testOllamaChatMainIndexError')
 
 async function testOllamaChatIndexNoModel():
     args = argsParse(ollamaChatArguments)
-    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({'conversations': []})}})
+    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({ 'tasks': [], 'conversations': []})}})
     ollamaChatIndexPage(args)
     unittestDeepEqual(unittestMockEnd(), [ \
         ['systemFetch', ['getConversations']], \
@@ -453,7 +464,7 @@ unittestRunTest('testOllamaChatIndexNoModel')
 
 async function testOllamaChatIndexEmpty():
     args = argsParse(ollamaChatArguments)
-    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({'model': 'm:1', 'conversations': [], 'templates': []})}})
+    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({ 'tasks': [], 'model': 'm:1', 'conversations': [], 'templates': []})}})
     ollamaChatIndexPage(args)
     unittestDeepEqual(unittestMockEnd(), [ \
         ['systemFetch', ['getConversations']], \
@@ -463,6 +474,8 @@ async function testOllamaChatIndexEmpty():
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
         ['markdownPrint', ['','## Workspace']], \
         ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
+['markdownPrint', ['', '## Tasks']], \
+        ['markdownPrint', ['', '\u00a0\u00a0\u00a0\u00a0' + '*No tasks*']], \
         ['markdownPrint', ['','## Conversations']], \
         ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
         ['markdownPrint', ['','## Templates']], \
@@ -475,7 +488,7 @@ unittestRunTest('testOllamaChatIndexEmpty')
 async function testOllamaChatIndexGenerating():
     args = argsParse(ollamaChatArguments)
     conv = {'id': 'C1', 'model': 'm:1', 'title': 'Chat', 'generating': true}
-    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({'model': 'm:1', 'conversations': [conv], 'templates': []})}})
+    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({ 'tasks': [], 'model': 'm:1', 'conversations': [conv], 'templates': []})}})
     ollamaChatIndexPage(args)
     unittestDeepEqual(unittestMockEnd(), [ \
         ['systemFetch', ['getConversations']], \
@@ -485,6 +498,8 @@ async function testOllamaChatIndexGenerating():
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
         ['markdownPrint', ['','## Workspace']], \
         ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
+['markdownPrint', ['', '## Tasks']], \
+        ['markdownPrint', ['', '\u00a0\u00a0\u00a0\u00a0' + '*No tasks*']], \
         ['markdownPrint', ['','## Conversations']], \
         ['elementModelRender', [ \
             [ \
@@ -525,7 +540,7 @@ async function testOllamaChatIndexGenerating():
         ['markdownPrint', ['','## Templates']], \
         ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No templates*']], \
         ['sessionStorageSet', ['ollama-chat-index-state', \
-            jsonStringify({'model': 'm:1', 'conversations': [conv], 'templates': []})]], \
+            jsonStringify({ 'tasks': [], 'model': 'm:1', 'conversations': [conv], 'templates': []})]], \
         ['windowSetTimeout', ['<function>',2000]] \
     ])
 endfunction
@@ -553,7 +568,7 @@ unittestRunTest('testOllamaChatIndexOnTimeoutUnchanged')
 
 async function testOllamaChatIndexOnTimeoutRerender():
     args = argsParse(ollamaChatArguments)
-    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({'model': 'm:1', 'conversations': [], 'templates': []})}})
+    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({ 'tasks': [], 'model': 'm:1', 'conversations': [], 'templates': []})}})
 
     # Stored state differs from the fetched state -> full re-render. The handler must pass the
     # conversations it already fetched to ollamaChatIndexPage, so getConversations is fetched only once.
@@ -569,6 +584,8 @@ async function testOllamaChatIndexOnTimeoutRerender():
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
         ['markdownPrint', ['','## Workspace']], \
         ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
+['markdownPrint', ['', '## Tasks']], \
+        ['markdownPrint', ['', '\u00a0\u00a0\u00a0\u00a0' + '*No tasks*']], \
         ['markdownPrint', ['','## Conversations']], \
         ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
         ['markdownPrint', ['','## Templates']], \
@@ -597,7 +614,7 @@ async function testOllamaChatIndexConversationSelected():
     systemGlobalSet('vActionID', 'C1')
     args = argsParse(ollamaChatArguments)
     conv = {'id': 'C1', 'model': 'm:1', 'title': 'Chat', 'generating': false}
-    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({'model': 'm:1', 'conversations': [conv], 'templates': []})}})
+    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({ 'tasks': [], 'model': 'm:1', 'conversations': [conv], 'templates': []})}})
     ollamaChatIndexPage(args)
     unittestDeepEqual(unittestMockEnd(), [ \
         ['systemFetch', ['getConversations']], \
@@ -607,6 +624,8 @@ async function testOllamaChatIndexConversationSelected():
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
         ['markdownPrint', ['','## Workspace']], \
         ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
+['markdownPrint', ['', '## Tasks']], \
+        ['markdownPrint', ['', '\u00a0\u00a0\u00a0\u00a0' + '*No tasks*']], \
         ['markdownPrint', ['','## Conversations']], \
         ['elementModelRender', [ \
             [ \
@@ -664,7 +683,7 @@ async function testOllamaChatIndexTemplateSelected():
     systemGlobalSet('vActionID', 'TT')
     args = argsParse(ollamaChatArguments)
     tmpl = {'id': 'TT', 'title': 'Tmpl'}
-    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({'model': 'm:1', 'conversations': [], 'templates': [tmpl]})}})
+    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({ 'tasks': [], 'model': 'm:1', 'conversations': [], 'templates': [tmpl]})}})
     ollamaChatIndexPage(args)
     unittestDeepEqual(unittestMockEnd(), [ \
         ['systemFetch', ['getConversations']], \
@@ -674,6 +693,8 @@ async function testOllamaChatIndexTemplateSelected():
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
         ['markdownPrint', ['','## Workspace']], \
         ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
+['markdownPrint', ['', '## Tasks']], \
+        ['markdownPrint', ['', '\u00a0\u00a0\u00a0\u00a0' + '*No tasks*']], \
         ['markdownPrint', ['','## Conversations']], \
         ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
         ['markdownPrint', ['','## Templates']], \
@@ -740,7 +761,7 @@ async function testOllamaChatIndexConversationActionBinding():
     args = argsParse(ollamaChatArguments)
     conv = {'id': 'C1', 'model': 'm:1', 'title': 'Chat', 'generating': false}
     render = systemPartial(ollamaChatIndexPage, args)
-    convData = {'systemFetch': {'getConversations': jsonStringify({'model': 'm:1', 'conversations': [conv], 'templates': []})}}
+    convData = {'systemFetch': {'getConversations': jsonStringify({ 'tasks': [], 'model': 'm:1', 'conversations': [conv], 'templates': []})}}
 
     # Each action button must be bound to its own action argument
     ollamaChatTestVerifyClick(render, 'Up', systemPartial(ollamaChatIndexOnConversationAction, args, 'C1', 'up'), convData)
@@ -750,7 +771,7 @@ async function testOllamaChatIndexConversationActionBinding():
     # The menu's Add Template button must be bound to the add-template handler
     ollamaChatTestVerifyClick(render, 'Add Template', ollamaChatIndexOnAddTemplate, \
         {'systemFetch': { \
-            'getConversations': jsonStringify({'model': 'm:1', 'conversations': [conv], 'templates': []}), \
+            'getConversations': jsonStringify({ 'tasks': [], 'model': 'm:1', 'conversations': [conv], 'templates': []}), \
             'createTemplate': jsonStringify({'id': 'NEWID'}) \
         }})
 
@@ -766,7 +787,7 @@ async function testOllamaChatIndexTemplateActionBinding():
     args = argsParse(ollamaChatArguments)
     tmpl = {'id': 'TT', 'title': 'Tmpl'}
     render = systemPartial(ollamaChatIndexPage, args)
-    tmplData = {'systemFetch': {'getConversations': jsonStringify({'model': 'm:1', 'conversations': [], 'templates': [tmpl]})}}
+    tmplData = {'systemFetch': {'getConversations': jsonStringify({ 'tasks': [], 'model': 'm:1', 'conversations': [], 'templates': [tmpl]})}}
 
     # Each action button must be bound to its own action argument
     ollamaChatTestVerifyClick(render, 'Up', systemPartial(ollamaChatIndexOnTemplateAction, args, 'TT', 'up'), tmplData)
@@ -776,7 +797,7 @@ async function testOllamaChatIndexTemplateActionBinding():
     # The template title button must start that template
     ollamaChatTestVerifyClick(render, 'Tmpl', systemPartial(ollamaChatIndexOnRunTemplate, 'TT'), \
         {'systemFetch': { \
-            'getConversations': jsonStringify({'model': 'm:1', 'conversations': [], 'templates': [tmpl]}), \
+            'getConversations': jsonStringify({ 'tasks': [], 'model': 'm:1', 'conversations': [], 'templates': [tmpl]}), \
             'getTemplate?id=TT': jsonStringify({'id': 'TT', 'title': 'Tmpl', 'prompts': ['p']}), \
             'startTemplate': jsonStringify({'id': 'CONV'}) \
         }})
@@ -785,3 +806,43 @@ async function testOllamaChatIndexTemplateActionBinding():
     systemGlobalSet('vActionID', null)
 endfunction
 unittestRunTest('testOllamaChatIndexTemplateActionBinding')
+
+
+async function testOllamaChatIndexTasks():
+    # The index page renders each scheduled task with its schedule and model
+    args = argsParse(ollamaChatArguments)
+    task = {'id': 'briefing', 'name': 'Daily Briefing', 'time': '09:00', 'days': [1, 2, 3, 4, 5], 'model': 'm:1', 'lastRun': null, 'lastError': null}
+    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({ 'tasks': [task], 'model': 'm:1', 'conversations': [], 'templates': []})}})
+    ollamaChatIndexPage(args)
+    unittestDeepEqual(unittestMockEnd(), [ \
+        ['systemFetch', ['getConversations']], \
+        ['documentSetTitle', ['Ollama Chat']], \
+        ['markdownPrint', ['# Ollama Chat']], \
+        ['markdownPrint', ['**Current Model:** m:1']], \
+        ['elementModelRender', [testOllamaChatIndexMenuElements]], \
+        ['markdownPrint', ['','## Workspace']], \
+        ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
+        ['markdownPrint', ['','## Tasks']], \
+        ['markdownPrint', ['','**briefing** - Daily Briefing - 09:00 - Mon, Tue, Wed, Thu, Fri - model m:1']], \
+        ['markdownPrint', ['','## Conversations']], \
+        ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
+        ['markdownPrint', ['','## Templates']], \
+        ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No templates*']] \
+    ])
+endfunction
+unittestRunTest('testOllamaChatIndexTasks')
+
+
+function testOllamaChatTaskDaysText():
+    # Every scheduled day of the week
+    unittestDeepEqual(ollamaChatTaskDaysText([1, 2, 3, 4, 5, 6, 7]), 'every day')
+
+    # A single day and a subset of days
+    unittestDeepEqual(ollamaChatTaskDaysText([1]), 'Mon')
+    unittestDeepEqual(ollamaChatTaskDaysText([1, 3, 5]), 'Mon, Wed, Fri')
+
+    # No days, and out-of-range day numbers
+    unittestDeepEqual(ollamaChatTaskDaysText([]), 'never')
+    unittestDeepEqual(ollamaChatTaskDaysText([8]), 'never')
+endfunction
+unittestRunTest('testOllamaChatTaskDaysText')

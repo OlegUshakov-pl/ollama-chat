@@ -67,7 +67,7 @@ class TestMain(unittest.TestCase):
             response = json.loads(application_wrap(environ, start_response)[0].decode('utf-8'))
 
             self.assertListEqual(start_response_calls, [('200 OK', [('Content-Type', 'application/json')])])
-            self.assertDictEqual(response, {'workspace': 'workspace-test', 'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': 'workspace-test', 'conversations': [], 'templates': [], 'tasks': []})
 
             self.assertEqual(
                 stdout.getvalue(),
@@ -114,7 +114,10 @@ ollama-chat: 200 GET /getConversations\x20
             response = json.loads(application_wrap(environ, start_response)[0].decode('utf-8'))
 
             self.assertListEqual(start_response_calls, [('200 OK', [('Content-Type', 'application/json')])])
-            self.assertDictEqual(response, {'workspace': 'workspace-test', 'model': 'llm', 'conversations': [], 'templates': []})
+            self.assertDictEqual( \
+                response, \
+                {'workspace': 'workspace-test', 'model': 'llm', 'conversations': [], 'templates': [], 'tasks': []} \
+            )
 
             self.assertEqual(
                 stdout.getvalue(),
@@ -156,7 +159,7 @@ ollama-chat: 200 GET /getConversations\x20
             response = json.loads(application_wrap(environ, start_response)[0].decode('utf-8'))
 
             self.assertListEqual(start_response_calls, [('200 OK', [('Content-Type', 'application/json')])])
-            self.assertDictEqual(response, {'workspace': temp_dir, 'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': temp_dir, 'conversations': [], 'templates': [], 'tasks': []})
 
             self.assertEqual(
                 stdout.getvalue(),
@@ -200,7 +203,7 @@ ollama-chat: 200 GET /getConversations\x20
             response = json.loads(application_wrap(environ, start_response)[0].decode('utf-8'))
 
             self.assertListEqual(start_response_calls, [('200 OK', [('Content-Type', 'application/json')])])
-            self.assertDictEqual(response, {'workspace': temp_dir, 'model': 'llm', 'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': temp_dir, 'model': 'llm', 'conversations': [], 'templates': [], 'tasks': []})
 
             self.assertEqual(
                 stdout.getvalue(),
@@ -245,7 +248,7 @@ ollama-chat: 200 GET /getConversations\x20
             response = json.loads(application_wrap(environ, start_response)[0].decode('utf-8'))
 
             self.assertListEqual(start_response_calls, [('200 OK', [('Content-Type', 'application/json')])])
-            self.assertDictEqual(response, {'workspace': temp_dir, 'model': 'llm', 'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': temp_dir, 'model': 'llm', 'conversations': [], 'templates': [], 'tasks': []})
 
             self.assertEqual(
                 stdout.getvalue(),
@@ -287,7 +290,7 @@ ollama-chat: 200 GET /getConversations\x20
             response = json.loads(application_wrap(environ, start_response)[0].decode('utf-8'))
 
             self.assertListEqual(start_response_calls, [('200 OK', [('Content-Type', 'application/json')])])
-            self.assertDictEqual(response, {'workspace': temp_dir, 'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': temp_dir, 'conversations': [], 'templates': [], 'tasks': []})
 
             self.assertEqual(stdout.getvalue(), '')
             self.assertEqual(stderr.getvalue(), '')

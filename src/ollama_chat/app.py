@@ -25,11 +25,12 @@ import schema_markdown
 from .chat import ChatManager, config_conversation, config_template_prompts
 from .memory import ensure_workspace, workspace_dir
 from .ollama import ollama_delete, ollama_list, ollama_pull
+from .tasks import TaskManager, load_tasks
 
 
 # The ollama-chat back-end API WSGI application class
 class OllamaChat(chisel.Application):
-    __slots__ = ('config', 'xorigin', 'chats', 'downloads', 'download_error', 'pool_manager')
+    __slots__ = ('config', 'xorigin', 'chats', 'downloads', 'download_error', 'pool_manager', 'tasks')
 
 
     def __init__(self, config_path, xorigin=False):
@@ -40,6 +41,7 @@ class OllamaChat(chisel.Application):
         self.downloads = {}
         self.download_error = None
         self.pool_manager = urllib3.PoolManager(num_pools=10, maxsize=10)
+        self.tasks = TaskManager(self)
 
         # Back-end documentation
         self.add_requests(chisel.create_doc_requests())
@@ -212,6 +214,18 @@ def get_conversations(ctx, unused_req):
                     'title': template['title']
                 }
                 for template in config['templates']
+            ],
+            'tasks': [
+                {
+                    'id': task.get('id', ''),
+                    'name': task.get('name', ''),
+                    'time': task.get('time', ''),
+                    'days': task.get('days') or [],
+                    'model': task.get('model', ''),
+                    'lastRun': task.get('lastRun'),
+                    'lastError': task.get('lastError')
+                }
+                for task in load_tasks(workspace_dir(config))
             ]
         }
         if 'model' in config:

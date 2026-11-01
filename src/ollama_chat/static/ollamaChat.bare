@@ -96,6 +96,25 @@ async function ollamaChatIndexPage(args, conversationsResponse):
         )
     endif
 
+    # Render the scheduled tasks
+    tasksInfo = objectGet(conversationsResponse, 'tasks')
+    tasksInfo = if(tasksInfo != null, tasksInfo, [])
+    markdownPrint('', '## Tasks')
+    if !tasksInfo:
+        markdownPrint('', spacer + spacer + '*No tasks*')
+    else:
+        for taskInfo in tasksInfo:
+            taskDays = objectGet(taskInfo, 'days')
+            markdownPrint( \
+                '', \
+                '**' + markdownEscape(objectGet(taskInfo, 'id')) + '** - ' \
+                + markdownEscape(objectGet(taskInfo, 'name')) + ' - ' \
+                + objectGet(taskInfo, 'time') + ' - ' + ollamaChatTaskDaysText(taskDays) \
+                + ' - model ' + markdownEscape(objectGet(taskInfo, 'model')) \
+            )
+        endfor
+    endif
+
     # Render the conversations
     conversations = objectGet(conversationsResponse, 'conversations')
     anyGenerating = false
@@ -258,6 +277,22 @@ async function ollamaChatIndexOnWorkspace():
 
     # Navigate back to the index page
     windowSetLocation(argsURL(ollamaChatArguments))
+endfunction
+
+
+# The task schedule day-of-week text. Days are ISO weekdays - Monday is 1, Sunday is 7.
+function ollamaChatTaskDaysText(days):
+    dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    dayTexts = []
+    for day in days:
+        if day >= 1 && day <= 7:
+            arrayPush(dayTexts, arrayGet(dayNames, day - 1))
+        endif
+    endfor
+    if arrayLength(dayTexts) == 7:
+        return 'every day'
+    endif
+    return if(arrayLength(dayTexts), arrayJoin(dayTexts, ', '), 'never')
 endfunction
 
 
