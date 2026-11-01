@@ -52,9 +52,21 @@ const STRINGS = {
     thinkingOff: 'Thinking off',
     webSearchOn: 'Web search on',
     webSearchOff: 'Web search off',
-    toolsLabel: 'Web tools',
+    emailOn: 'Email tools on',
+    emailOff: 'Email tools off',
+    toolsLabel: 'Tools',
     toolSearch: 'Search',
     toolOpen: 'Opened page',
+    toolCheck: 'Read email',
+    toolSend: 'Email to',
+    emailConfirmTitle: 'Send this email?',
+    emailDraftTo: 'To',
+    emailDraftSubject: 'Subject',
+    emailSendDraft: 'Send',
+    emailDiscard: 'Discard',
+    emailSent: 'Email sent',
+    menuExportPdf: 'Export PDF',
+    pdfExported: 'PDF exported to',
     uploadFile: 'Upload file',
     uploadFilesMax: 'A maximum of 10 files can be attached to a message.',
     uploadFilesType: 'Only txt, md, docx, png, jpg and jpeg files can be attached.',
@@ -85,6 +97,9 @@ const ICONS = {
     pawOff: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="10" r="5"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="4" y1="7" x2="20" y2="23"/><path d="M16 7.5V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2.5"/></svg>',
     globe: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><ellipse cx="12" cy="12" rx="4" ry="9"/></svg>',
     globeOff: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><ellipse cx="12" cy="12" rx="4" ry="9"/><line x1="4.5" y1="4.5" x2="19.5" y2="19.5"/></svg>',
+    mail: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>',
+    mailOff: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/><line x1="4" y1="5" x2="20" y2="19"/></svg>',
+    pdfExport: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M12 18v-5"/><path d="m9 16 3 3 3-3"/></svg>',
     upload: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
     clip: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57a4 4 0 1 1 5.66 5.66l-8.58 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
     md: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg>',
@@ -128,6 +143,8 @@ const state = {
     thinkingEnabled: loadThinkingEnabled(),
     toolsOpen: {},
     webSearchEnabled: loadWebSearchEnabled(),
+    emailEnabled: loadEmailEnabled(),
+    notice: null,
     uploading: false,
     mdViewer: null,
 };
@@ -150,6 +167,16 @@ function loadWebSearchEnabled() {
 
 function saveWebSearchEnabled(val) {
     try { window.localStorage.setItem('ollama-chat-websearch', String(val)); } catch (err) { /* ignore */ }
+}
+
+function loadEmailEnabled() {
+    try {
+        return window.localStorage.getItem('ollama-chat-email') === 'true';
+    } catch (err) { return false; }
+}
+
+function saveEmailEnabled(val) {
+    try { window.localStorage.setItem('ollama-chat-email', String(val)); } catch (err) { /* ignore */ }
 }
 
 function fileExt(name) {
@@ -337,6 +364,36 @@ async function downloadCurrentChat() {
     }
 }
 
+/** Confirm (send=true) or discard (send=false) a model-drafted email. */
+async function sendEmailDraft(ix, send) {
+    if (state.route.name !== 'chat') {
+        return;
+    }
+    try {
+        await apiPost('sendEmail', { id: state.route.id, send });
+        state.notice = send ? STRINGS.emailSent : null;
+        await loadConversation(state.route.id);
+    } catch (err) {
+        state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
+        render();
+    }
+}
+
+/** Export the chat's current conversation as a PDF (server-rendered). */
+async function exportCurrentChatPdf() {
+    if (state.route.name !== 'chat') {
+        return;
+    }
+    try {
+        const data = await apiPost('exportPdf', { id: state.route.id });
+        state.notice = `${STRINGS.pdfExported} ${data.file}`;
+        render();
+    } catch (err) {
+        state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
+        render();
+    }
+}
+
 function applyTheme(theme) {
     if (theme) {
         document.documentElement.setAttribute('data-theme', theme);
@@ -427,12 +484,19 @@ function renderThinking(exchange, ix, isLast, generating) {
 
 /** The web tool call's icon and label (e.g. "Search: python news"). */
 function toolCallIcon(tool) {
-    return tool.action === 'search' ? '🔍' : '🌐';
+    if (tool.action === 'search') return '🔍';
+    if (tool.action === 'open') return '🌐';
+    if (tool.action === 'check') return '📧';
+    if (tool.action === 'send') return '📤';
+    return '🌐';
 }
 
 function toolCallLabel(tool) {
-    const label = tool.action === 'search' ? STRINGS.toolSearch : STRINGS.toolOpen;
-    return `${label}: ${tool.value}`;
+    if (tool.action === 'search') return `${STRINGS.toolSearch}: ${tool.value}`;
+    if (tool.action === 'open') return `${STRINGS.toolOpen}: ${tool.value}`;
+    if (tool.action === 'check') return `${STRINGS.toolCheck}: ${tool.value}`;
+    if (tool.action === 'send') return `${STRINGS.toolSend}: ${tool.value}`;
+    return `${STRINGS.toolOpen}: ${tool.value}`;
 }
 
 function isToolCallsOpen(ix) {
@@ -442,7 +506,7 @@ function isToolCallsOpen(ix) {
     return false;
 }
 
-/** Render an exchange's web tool calls as a collapsible block. */
+/** Render an exchange's web/email tool calls as a collapsible block. */
 function renderToolCalls(exchange, ix) {
     const tools = exchange.tools || [];
     const open = isToolCallsOpen(ix);
@@ -456,6 +520,25 @@ function renderToolCalls(exchange, ix) {
         `${toolCallIcon(first)}<span>${escapeHtml(label)}</span>${ICONS.chevron}</button>` +
         `<div class="tool-calls-body"${open ? '' : ' hidden'}>${rows}</div>` +
         `</div>`;
+}
+
+/** Render an exchange's email draft awaiting the user's send confirmation. */
+function renderEmailDraft(email, ix) {
+    if (email.sent) {
+        return `<div class="email-draft email-draft-sent" role="status">✅ ` +
+            `<span>${escapeHtml(`${STRINGS.emailSent}: ${email.to}`)}</span></div>`;
+    }
+    return `<div class="email-draft" role="group" aria-label="${escapeHtml(STRINGS.emailConfirmTitle)}">` +
+        `<div class="email-draft-head">📧<strong>${escapeHtml(STRINGS.emailConfirmTitle)}</strong></div>` +
+        `<p class="email-draft-row"><span class="email-draft-label">${escapeHtml(STRINGS.emailDraftTo)}:</span>` +
+        `<span class="email-draft-value">${escapeHtml(email.to)}</span></p>` +
+        `<p class="email-draft-row"><span class="email-draft-label">${escapeHtml(STRINGS.emailDraftSubject)}:</span>` +
+        `<span class="email-draft-value">${escapeHtml(email.subject)}</span></p>` +
+        `<pre class="email-draft-body">${escapeHtml(email.body)}</pre>` +
+        `<div class="email-draft-actions">` +
+        `<button type="button" class="btn btn-primary" data-action="send-email" data-ix="${ix}">${escapeHtml(STRINGS.emailSendDraft)}</button>` +
+        `<button type="button" class="btn" data-action="discard-email" data-ix="${ix}">${escapeHtml(STRINGS.emailDiscard)}</button>` +
+        `</div></div>`;
 }
 
 function renderActions(ix, isLast, generating) {
@@ -492,6 +575,9 @@ function renderExchange(exchange, ix, isLast, generating) {
     }
     if (exchange.tools && exchange.tools.length) {
         html += renderToolCalls(exchange, ix);
+    }
+    if (exchange.email) {
+        html += renderEmailDraft(exchange.email, ix);
     }
     if (exchange.model) {
         html += `<div class="msg msg-model"><div class="md">${renderMarkdown(exchange.model)}</div>` +
@@ -652,12 +738,16 @@ function buildMessagesHtml() {
     }
     if (state.route.name === 'new') {
         return (state.error ? `<div class="error-banner" role="alert">${escapeHtml(STRINGS.errorBannerPrefix)}${escapeHtml(state.error)}</div>` : '') +
+            (state.notice ? `<div class="notice-banner" role="status">${escapeHtml(state.notice)}</div>` : '') +
             `<p>${escapeHtml(STRINGS.greeting)}</p>`;
     }
     const cur = state.current;
     let html = '';
     if (state.error) {
         html += `<div class="error-banner" role="alert">${escapeHtml(STRINGS.errorBannerPrefix)}${escapeHtml(state.error)}</div>`;
+    }
+    if (state.notice) {
+        html += `<div class="notice-banner" role="status">${escapeHtml(state.notice)}</div>`;
     }
     if (!cur || cur.loading) {
         return `${html}<p>${escapeHtml(STRINGS.loading)}</p>`;
@@ -710,11 +800,13 @@ function buildChatHeaderHtml() {
     const cur = state.current;
     const conversation = cur && cur.conversation;
     const title = conversation ? conversation.title : chatTitle(state.route.id);
-    const button = conversation
+    const buttons = conversation
         ? `<button type="button" class="action-btn" data-action="download-chat" ` +
-            `title="${escapeHtml(STRINGS.menuDownload)}" aria-label="${escapeHtml(STRINGS.menuDownload)}">${ICONS.download}</button>`
+            `title="${escapeHtml(STRINGS.menuDownload)}" aria-label="${escapeHtml(STRINGS.menuDownload)}">${ICONS.download}</button>` +
+            `<button type="button" class="action-btn" data-action="export-pdf" ` +
+            `title="${escapeHtml(STRINGS.menuExportPdf)}" aria-label="${escapeHtml(STRINGS.menuExportPdf)}">${ICONS.pdfExport}</button>`
         : '';
-    return `<div class="chat-header"><h1 class="chat-header-title">${escapeHtml(title)}</h1>${button}</div>`;
+    return `<div class="chat-header"><h1 class="chat-header-title">${escapeHtml(title)}</h1>${buttons}</div>`;
 }
 
 function buildModelMenuHtml() {
@@ -741,6 +833,8 @@ function buildComposerHtml() {
     const thinkingTitle = state.thinkingEnabled ? STRINGS.thinkingOn : STRINGS.thinkingOff;
     const webSearchIcon = state.webSearchEnabled ? ICONS.globe : ICONS.globeOff;
     const webSearchTitle = state.webSearchEnabled ? STRINGS.webSearchOn : STRINGS.webSearchOff;
+    const emailIcon = state.emailEnabled ? ICONS.mail : ICONS.mailOff;
+    const emailTitle = state.emailEnabled ? STRINGS.emailOn : STRINGS.emailOff;
     return `<textarea id="composer-input" rows="1" placeholder="${escapeHtml(STRINGS.composerPlaceholder)}" ` +
         `aria-label="${escapeHtml(STRINGS.composerPlaceholder)}">${escapeHtml(draft)}</textarea>` +
         (uploadFiles.length ? buildUploadChipsHtml() : '') +
@@ -754,6 +848,8 @@ function buildComposerHtml() {
         `</div>` +
         `<button type="button" class="icon-btn${state.webSearchEnabled ? ' websearch-active' : ''}" id="websearch-btn" data-action="toggleWebSearch" ` +
         `title="${escapeHtml(webSearchTitle)}" aria-label="${escapeHtml(webSearchTitle)}">${webSearchIcon}</button>` +
+        `<button type="button" class="icon-btn${state.emailEnabled ? ' email-active' : ''}" id="email-btn" data-action="toggleEmail" ` +
+        `title="${escapeHtml(emailTitle)}" aria-label="${escapeHtml(emailTitle)}">${emailIcon}</button>` +
         `<button type="button" class="icon-btn${state.thinkingEnabled ? ' thinking-active' : ''}" id="thinking-btn" data-action="toggleThinking" ` +
         `title="${escapeHtml(thinkingTitle)}" aria-label="${escapeHtml(thinkingTitle)}">${thinkingIcon}</button>` +
         `<button type="button" class="icon-btn${uploadFiles.length ? ' upload-active' : ''}" id="upload-btn" data-action="uploadFile" ` +
@@ -973,6 +1069,7 @@ async function submitComposer() {
     }
     state.sending = true;
     state.error = null;
+    state.notice = null;
     render();
     try {
         if (state.route.name === 'new') {
@@ -981,7 +1078,7 @@ async function submitComposer() {
                 throw new Error(STRINGS.errorNoModel);
             }
             const files = await readFilesAsData(uploadFiles);
-            const data = await apiPost('startConversation', { model, user: text, think: state.thinkingEnabled, search: state.webSearchEnabled, files });
+            const data = await apiPost('startConversation', { model, user: text, think: state.thinkingEnabled, search: state.webSearchEnabled, email: state.emailEnabled, files });
             setDraft('');
             uploadFiles = [];
             state.sending = false;
@@ -989,7 +1086,7 @@ async function submitComposer() {
             await refreshConversations();
         } else {
             const files = await readFilesAsData(uploadFiles);
-            await apiPost('replyConversation', { id: state.route.id, user: text, think: state.thinkingEnabled, search: state.webSearchEnabled, files });
+            await apiPost('replyConversation', { id: state.route.id, user: text, think: state.thinkingEnabled, search: state.webSearchEnabled, email: state.emailEnabled, files });
             setDraft('');
             uploadFiles = [];
             state.sending = false;
@@ -1101,6 +1198,7 @@ function onHashChange() {
     state.mdViewer = null;
     state.current = null;
     state.sending = false;
+    state.notice = null;
     state.thinkingOpen = {};
     state.toolsOpen = {};
     document.getElementById('layout')?.classList.remove('sidebar-open');
@@ -1141,6 +1239,12 @@ function onRootClick(event) {
             deleteLastExchange();
         } else if (action === 'download-chat') {
             downloadCurrentChat();
+        } else if (action === 'export-pdf') {
+            exportCurrentChatPdf();
+        } else if (action === 'send-email') {
+            sendEmailDraft(Number(actionButton.dataset.ix), true);
+        } else if (action === 'discard-email') {
+            sendEmailDraft(Number(actionButton.dataset.ix), false);
         } else if (action === 'thinking') {
             const ix = Number(actionButton.dataset.ix);
             const cur = state.current;
@@ -1155,6 +1259,10 @@ function onRootClick(event) {
         } else if (action === 'toggleWebSearch') {
             state.webSearchEnabled = !state.webSearchEnabled;
             saveWebSearchEnabled(state.webSearchEnabled);
+            render();
+        } else if (action === 'toggleEmail') {
+            state.emailEnabled = !state.emailEnabled;
+            saveEmailEnabled(state.emailEnabled);
             render();
         } else if (action === 'tools') {
             const toolIx = Number(actionButton.dataset.ix);

@@ -21,14 +21,16 @@ from .ollama import ollama_chat, ollama_show
 
 
 # The tools available to scheduled tasks - read-only tools only, for safety. Tools that write
-# (like send_email) must never be added here unless explicitly made opt-in by the user.
-TASK_TOOLS = ('web_search', 'fetch_page')
+# (like send_email, which also requires an explicit user confirmation in the UI) must never be
+# added here unless explicitly made opt-in by the user.
+TASK_TOOLS = ('web_search', 'fetch_page', 'check_email')
 
 
 def _task_web_tools():
-    # Imported inline to avoid a circular import with the chat module
+    # Imported inline to avoid a circular import with the chat and email modules
+    from .email_tools import EMAIL_TOOLS  # pylint: disable=import-outside-toplevel
     from .web_tools import WEB_TOOLS  # pylint: disable=import-outside-toplevel
-    return WEB_TOOLS
+    return [*WEB_TOOLS, *EMAIL_TOOLS]
 
 
 # The workspace task and log file names
@@ -279,7 +281,11 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
         messages.append({'role': 'assistant', 'content': round_content, 'tool_calls': tool_calls})
         for tool_call in tool_calls:
             tool_name, arguments = _tool_call_arguments(tool_call)
-            tool_content, _tool_event = _run_tool(chat_shim, tool_name, arguments)
+            try:
+                tool_content, _tool_event = _run_tool(chat_shim, tool_name, arguments)
+            except Exception as exc:
+                # Tool errors are returned to the model as text rather than failing the task
+                tool_content = f'Error: {exc}'
             messages.append({'role': 'tool', 'tool_name': tool_name, 'content': tool_content})
 
 

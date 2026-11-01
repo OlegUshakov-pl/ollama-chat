@@ -34,7 +34,7 @@ TEST_TASK = {
     'prompt': 'Make a report',
     'model': 'llm',
     'num_ctx': None,
-    'tools': ['web_search', 'fetch_page'],
+    'tools': ['web_search', 'fetch_page', 'check_email'],
     'dest': 'daily',
     'lastRun': None,
     'lastError': None
@@ -1513,6 +1513,242 @@ file content
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
                 self.assertEqual(json.load(config_fh), expected_config)
+
+    def test_chat_fn_email_tools(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ]
+            }))
+        ]
+        tool_call = {'function': {'name': 'check_email', 'arguments': {'limit': 3, 'unread_only': True}}}
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('threading.Thread') as mock_thread, \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager, \
+             unittest.mock.patch(
+                 'ollama_chat.chat.check_email',
+                 return_value=[{'from': 'Alice <a@example.com>', 'subject': 'Hi', 'date': 'Sun, 01 Nov 2026', 'excerpt': 'Hello.'}]
+             ) as mock_check_email:
+
+            # Create a mock show response with the tools capability
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': ['tools']}
+
+            # Create a mock chat response with a tool call
+            mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response.status = 200
+            mock_chat_response.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'Checking...'}}).encode('utf-8'),
+                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8')
+            ]
+
+            # Create a mock chat response with the final answer
+            mock_chat_response2 = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response2.status = 200
+            mock_chat_response2.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'You have one unread email.'}}).encode('utf-8')
+            ]
+
+            # Configure the mock pool manager instance
+            requests = []
+            mock_pool_manager_instance = mock_pool_manager.return_value
+            mock_pool_manager_instance.request.side_effect = record_requests(
+                [mock_show_response, mock_chat_response, mock_chat_response2], requests
+            )
+
+            # Create the ChatManager instance
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            chat_manager = ChatManager(app, 'conv1', ['Hello'], email=True)
+            app.chats['conv1'] = chat_manager
+            mock_thread.assert_called_once_with(target=ChatManager.chat_thread_fn, args=(chat_manager,))
+
+            # Run the thread function
+            ChatManager.chat_thread_fn(chat_manager)
+            self.assertDictEqual(app.chats, {})
+
+            # Verify the email-only tool list and the security system prompt
+            chat_calls = [payload for args, payload in requests if args[1].endswith('/api/chat')]
+            self.assertEqual(len(chat_calls), 2)
+            self.assertListEqual(
+                [tool['function']['name'] for tool in chat_calls[0]['tools']],
+                ['check_email', 'send_email']
+            )
+            self.assertEqual(chat_calls[0]['messages'][0]['role'], 'system')
+            self.assertIn('EMAIL SECURITY RULES', chat_calls[0]['messages'][0]['content'])
+            self.assertEqual(chat_calls[0]['messages'][1], {'role': 'user', 'content': 'Hello', 'images': None})
+
+            # Verify check_email is called without marking messages as read
+            mock_check_email.assert_called_once_with(limit=3, unread_only=True)
+
+            # Verify the tool result message is returned to the model as untrusted data
+            tool_message = chat_calls[1]['messages'][-1]
+            self.assertEqual(tool_message['tool_name'], 'check_email')
+            self.assertIn('untrusted data', tool_message['content'])
+
+            # Verify the app config, including the tool event
+            expected_config = {
+                'conversations': [
+                    {
+                        'id': 'conv1',
+                        'model': 'llm',
+                        'title': 'Conversation 1',
+                        'exchanges': [
+                            {
+                                'user': 'Hello',
+                                'model': 'Checking...You have one unread email.',
+                                'tools': [{'action': 'check', 'value': '1 unread'}]
+                            }
+                        ]
+                    }
+                ]
+            }
+            with app.config() as config:
+                self.assertDictEqual(config, expected_config)
+
+    def test_chat_fn_send_email_requires_confirmation(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ]
+            }))
+        ]
+        tool_call = {
+            'function': {'name': 'send_email', 'arguments': {'to': 'client@example.com', 'subject': 'Hi', 'body': 'Hello!'}}
+        }
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('threading.Thread'), \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager, \
+             unittest.mock.patch('ollama_chat.email_tools.send_email') as mock_smtp_send:
+
+            # Create a mock show response with the tools capability
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': ['tools']}
+
+            # Create a mock chat response with a tool call
+            mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response.status = 200
+            mock_chat_response.read_chunked.return_value = [
+                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8')
+            ]
+
+            # Create a mock chat response with the final answer
+            mock_chat_response2 = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response2.status = 200
+            mock_chat_response2.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'Please confirm the draft.'}}).encode('utf-8')
+            ]
+
+            # Configure the mock pool manager instance
+            requests = []
+            mock_pool_manager_instance = mock_pool_manager.return_value
+            mock_pool_manager_instance.request.side_effect = record_requests(
+                [mock_show_response, mock_chat_response, mock_chat_response2], requests
+            )
+
+            # Create the ChatManager instance
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            chat_manager = ChatManager(app, 'conv1', ['Hello'], email=True)
+            app.chats['conv1'] = chat_manager
+
+            # Run the thread function
+            ChatManager.chat_thread_fn(chat_manager)
+            self.assertDictEqual(app.chats, {})
+
+            # Verify the email is NOT sent - the draft awaits the user's confirmation
+            mock_smtp_send.assert_not_called()
+
+            # Verify the app config, including the pending draft and the tool event
+            expected_config = {
+                'conversations': [
+                    {
+                        'id': 'conv1',
+                        'model': 'llm',
+                        'title': 'Conversation 1',
+                        'exchanges': [
+                            {
+                                'user': 'Hello',
+                                'model': 'Please confirm the draft.',
+                                'email': {'to': 'client@example.com', 'subject': 'Hi', 'body': 'Hello!'},
+                                'tools': [{'action': 'send', 'value': 'client@example.com'}]
+                            }
+                        ]
+                    }
+                ]
+            }
+            with app.config() as config:
+                self.assertDictEqual(config, expected_config)
+
+    def test_chat_fn_email_unsupported_model(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ]
+            }))
+        ]
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('threading.Thread'), \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+
+            # Create a mock show response without the tools capability
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': ['completion']}
+
+            # Create a mock chat response
+            mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response.status = 200
+            mock_chat_response.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'The answer.'}}).encode('utf-8')
+            ]
+
+            # Configure the mock pool manager instance
+            requests = []
+            mock_pool_manager_instance = mock_pool_manager.return_value
+            mock_pool_manager_instance.request.side_effect = record_requests(
+                [mock_show_response, mock_chat_response], requests
+            )
+
+            # Create the ChatManager instance
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            chat_manager = ChatManager(app, 'conv1', ['Hello'], email=True)
+            app.chats['conv1'] = chat_manager
+
+            # Run the thread function
+            ChatManager.chat_thread_fn(chat_manager)
+            self.assertDictEqual(app.chats, {})
+
+            # Verify the chat request doesn't offer the tools
+            chat_calls = [payload for args, payload in requests if args[1].endswith('/api/chat')]
+            self.assertEqual(len(chat_calls), 1)
+            self.assertNotIn('tools', chat_calls[0])
+
+            # Verify the app config
+            expected_config = {
+                'conversations': [
+                    {
+                        'id': 'conv1',
+                        'model': 'llm',
+                        'title': 'Conversation 1',
+                        'exchanges': [
+                            {
+                                'user': 'Hello',
+                                'model': '\n**Email tools are unavailable:** this model does not support ' \
+                                    'tool calling.The answer.'
+                            }
+                        ]
+                    }
+                ]
+            }
+            with app.config() as config:
+                self.assertDictEqual(config, expected_config)
 
     def test_chat_fn_web_search_unsupported_model(self):
         test_files = [

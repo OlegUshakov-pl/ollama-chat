@@ -42,7 +42,7 @@ TEST_TASK = {
     'prompt': 'Make a report',
     'model': 'llm',
     'num_ctx': None,
-    'tools': ['web_search', 'fetch_page'],
+    'tools': ['web_search', 'fetch_page', 'check_email'],
     'dest': 'daily',
     'lastRun': None,
     'lastError': None
@@ -192,6 +192,10 @@ class TestTaskAddRemove(unittest.TestCase):
             tasks = load_tasks(temp_dir)
             self.assertEqual(tasks[0]['num_ctx'], 8192)
             self.assertListEqual(tasks[0]['tools'], ['web_search'])
+
+            # Email reading is allowed in tasks, sending is not
+            task_add(temp_dir, 'T2', parse_task_time('09:00'), parse_task_days('all'), 'p', 'llm', tools='check_email')
+            self.assertListEqual(load_tasks(temp_dir)[1]['tools'], ['check_email'])
 
 
     def test_task_add_unknown_tool(self):
@@ -361,13 +365,29 @@ class TestRunTask(unittest.TestCase):
     def test_run_task_no_tools_capability(self):
         with create_test_files([]) as temp_dir:
             ensure_workspace(temp_dir)
-            task = dict(TEST_TASK)  # tools: web_search, fetch_page
+            task = dict(TEST_TASK)  # tools: web_search, fetch_page, check_email
 
             # The model can't tool-call, so the tools argument is null
             with mock_ollama([[{'message': {'content': 'The report.'}}]], capabilities=[]) as (mock_chat, _mock_show):
                 report = _run_task(unittest.mock.sentinel.pool, temp_dir, task)
             self.assertEqual(report, 'The report.')
             self.assertIsNone(mock_chat.call_args.kwargs.get('tools'))
+
+
+    def test_run_task_send_email_tool_error(self):
+        # A model trying to send email from a scheduled task gets an error as text - no draft, no send
+        with create_test_files([]) as temp_dir:
+            ensure_workspace(temp_dir)
+            task = dict(TEST_TASK)  # tools: web_search, fetch_page, check_email
+            tool_call = {'function': {'name': 'send_email', 'arguments': {'to': 'x@y.z', 'subject': 's', 'body': 'b'}}}
+            rounds = [
+                [{'message': {'content': 'sending', 'tool_calls': [tool_call]}}],
+                [{'message': {'content': 'The report.'}}]
+            ]
+            with mock_ollama(rounds, capabilities=['tools']):
+                report = _run_task(unittest.mock.sentinel.pool, temp_dir, task)
+            self.assertEqual(report, 'The report.')
+            self.assertNotIn('email', os.listdir(temp_dir))
 
 
 class TestTaskManager(unittest.TestCase):

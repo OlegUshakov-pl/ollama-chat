@@ -228,6 +228,72 @@ svg.icon {
     font-size: 14px;
 }
 
+.notice-banner {
+    max-width: var(--column-width);
+    margin: 0 auto 12px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: #ecf7ee;
+    color: #1f6b34;
+    font-size: 14px;
+}
+
+.email-draft {
+    max-width: 80%;
+    padding: 10px 14px;
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-code);
+    font-size: 14px;
+}
+
+.email-draft-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    color: var(--text);
+}
+
+.email-draft-row {
+    display: flex;
+    gap: 6px;
+    margin: 0 0 4px;
+    overflow-wrap: anywhere;
+}
+
+.email-draft-label {
+    color: var(--text-secondary);
+    flex: none;
+}
+
+.email-draft-value {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.email-draft-body {
+    margin: 6px 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: color-mix(in srgb, currentColor 6%, transparent);
+    font: 13px var(--font-mono, monospace);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.email-draft-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.email-draft-sent {
+    color: #1f6b34;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 :root {
     --danger: #c62f2f;
     --shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
@@ -483,10 +549,32 @@ svg.icon {
     color: #f5c6c6;
 }
 
+:root[data-theme="dark"] .notice-banner {
+    background: #243528;
+    color: #c3e6cd;
+}
+
+:root[data-theme="dark"] .email-draft-sent {
+    color: #8fce9e;
+}
+
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .error-banner {
         background: #3a2323;
         color: #f5c6c6;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .notice-banner {
+        background: #243528;
+        color: #c3e6cd;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .email-draft-sent {
+        color: #8fce9e;
     }
 }
 
@@ -803,6 +891,23 @@ svg.icon-small {
 
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .icon-btn.websearch-active {
+        background: #ececec;
+        color: #1a1a1a;
+    }
+}
+
+.icon-btn.email-active {
+    background: #202020;
+    color: #ffffff;
+}
+
+:root[data-theme="dark"] .icon-btn.email-active {
+    background: #ececec;
+    color: #1a1a1a;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .icon-btn.email-active {
         background: #ececec;
         color: #1a1a1a;
     }

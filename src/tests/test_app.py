@@ -57,6 +57,7 @@ class TestApp(unittest.TestCase):
                     'ollamaChatUtil.bare',
                     'regenerateConversationExchange',
                     'replyConversation',
+                    'sendEmail',
                     'setConversationTitle',
                     'setModel',
                     'setWorkspace',
@@ -106,6 +107,7 @@ class TestApp(unittest.TestCase):
                     'ollamaChatUtil.bare',
                     'regenerateConversationExchange',
                     'replyConversation',
+                    'sendEmail',
                     'setConversationTitle',
                     'setModel',
                     'setWorkspace',
@@ -1941,6 +1943,125 @@ class TestAPI(unittest.TestCase):
                 self.assertListEqual(headers, [('Content-Type', 'application/json')])
                 # Note: memory-file paths outside memory/ are rejected by the daily/ regex
                 self.assertEqual(response, {'error': 'UnknownFile', 'message': message})
+
+
+    def test_send_email(self):
+        original_config = {
+            'conversations': [
+                {
+                    'id': 'conv1',
+                    'model': 'llm',
+                    'title': 'Conversation 1',
+                    'exchanges': [
+                        {
+                            'user': 'Send my regards',
+                            'model': 'The draft is ready.',
+                            'email': {'to': 'client@example.com', 'subject': 'Regards', 'body': 'Kindest regards.'}
+                        }
+                    ]
+                }
+            ]
+        }
+        test_files = [('ollama-chat.json', json.dumps(original_config))]
+        with create_test_files(test_files) as temp_dir, \
+              unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}), \
+              unittest.mock.patch('ollama_chat.app.smtp_send_email', return_value='Email sent to client@example.com') as mock_send:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            # Send the drafted email
+            status, headers, content_bytes = app.request('POST', '/sendEmail', wsgi_input=json.dumps({'id': 'conv1'}).encode('utf-8'))
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertListEqual(headers, [('Content-Type', 'application/json')])
+            self.assertDictEqual(response, {'sent': True})
+            mock_send.assert_called_once_with('client@example.com', 'Regards', 'Kindest regards.')
+
+            # The draft is marked as sent
+            with app.config() as config:
+                email_draft = config['conversations'][0]['exchanges'][0]['email']
+                self.assertDictEqual(email_draft, {'to': 'client@example.com', 'subject': 'Regards', 'body': 'Kindest regards.', 'sent': True})
+
+
+    def test_send_email_discard(self):
+        original_config = {
+            'conversations': [
+                {
+                    'id': 'conv1',
+                    'model': 'llm',
+                    'title': 'Conversation 1',
+                    'exchanges': [
+                        {
+                            'user': 'Never mind',
+                            'model': 'The draft is ready.',
+                            'email': {'to': 'client@example.com', 'subject': 'Regards', 'body': 'Kindest regards.'}
+                        }
+                    ]
+                }
+            ]
+        }
+        test_files = [('ollama-chat.json', json.dumps(original_config))]
+        with create_test_files(test_files) as temp_dir, \
+              unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}), \
+              unittest.mock.patch('ollama_chat.app.smtp_send_email') as mock_send:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            # Discard the drafted email
+            status, headers, content_bytes = app.request('POST', '/sendEmail', wsgi_input=json.dumps({'id': 'conv1', 'send': False}).encode('utf-8'))
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertListEqual(headers, [('Content-Type', 'application/json')])
+            self.assertDictEqual(response, {'sent': False})
+            mock_send.assert_not_called()
+
+            # The draft is gone and the change is saved
+            with app.config() as config:
+                self.assertNotIn('email', config['conversations'][0]['exchanges'][0])
+            with open(config_path, encoding='utf-8') as config_fh:
+                saved_config = json.load(config_fh)
+            self.assertNotIn('email', saved_config['conversations'][0]['exchanges'][0])
+
+
+    def test_send_email_errors(self):
+        original_config = {
+            'conversations': [
+                {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': [{'user': 'Hello', 'model': 'Hi!'}]},
+                {
+                    'id': 'conv2',
+                    'model': 'llm',
+                    'title': 'Conversation 2',
+                    'exchanges': [{'user': 'Hi', 'model': 'Hello', 'email': {'to': 'client@example.com', 'subject': 'Hi', 'body': 'Hello.'}}]
+                }
+            ]
+        }
+        test_files = [('ollama-chat.json', json.dumps(original_config))]
+        with create_test_files(test_files) as temp_dir, \
+              unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}), \
+              unittest.mock.patch('ollama_chat.app.smtp_send_email', side_effect=ValueError('SMTP server is down')):
+            app = OllamaChat(os.path.join(temp_dir, 'ollama-chat.json'))
+
+            # Unknown conversation and no draft
+            for request_body, error in [
+                ({'id': 'conv3'}, 'UnknownConversationID'),
+                ({'id': 'conv1'}, 'NoEmailDraft')
+            ]:
+                status, headers, content_bytes = app.request('POST', '/sendEmail', wsgi_input=json.dumps(request_body).encode('utf-8'))
+                response = json.loads(content_bytes.decode('utf-8'))
+                self.assertEqual(status, '400 Bad Request')
+                self.assertListEqual(headers, [('Content-Type', 'application/json')])
+                self.assertDictEqual(response, {'error': error})
+
+            # Send failure
+            status, headers, content_bytes = app.request('POST', '/sendEmail', wsgi_input=json.dumps({'id': 'conv2'}).encode('utf-8'))
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            self.assertListEqual(headers, [('Content-Type', 'application/json')])
+            self.assertDictEqual(response, {'error': 'SendFailed', 'message': 'SMTP server is down'})
+
+            # The failed draft is kept so the user can retry
+            with app.config() as config:
+                self.assertIn('email', config['conversations'][1]['exchanges'][0])
 
 
     def test_reply_conversation_success(self):

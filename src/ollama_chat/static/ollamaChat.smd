@@ -82,15 +82,35 @@ struct ConversationExchange
     # The web tool calls the model made during this exchange
     optional ConversationTool[] tools
 
+    # The email draft created by the model, awaiting the user's send confirmation
+    optional EmailDraft email
+
 
 # A web tool call made by the model
 struct ConversationTool
 
-    # The tool action - 'search' (web_search) or 'open' (fetch_page)
+    # The tool action - 'search' (web_search), 'open' (fetch_page), 'check' (check_email) or
+    # 'send' (drafted email awaiting confirmation)
     string action
 
-    # The search query or the page URL
+    # The search query, the page URL or the email summary (e.g. "2 unread")
     string value
+
+
+# An email draft created by the model, awaiting the user's send confirmation
+struct EmailDraft
+
+    # The draft recipient address(es)
+    string to
+
+    # The draft subject
+    string subject
+
+    # The draft body
+    string body
+
+    # True once the user confirmed sending the email
+    optional bool sent
 
 
 # A conversation template info struct
@@ -425,6 +445,9 @@ action startConversation
         # If true, let the model search the web and read web pages
         optional bool search
 
+        # If true, let the model read emails and draft emails for user approval
+        optional bool email
+
         # Attached files [{name, type, data}] - at most 10 files
         optional ConversationFile[len <= 10] files
 
@@ -510,11 +533,36 @@ action replyConversation
         # If true, let the model search the web and read web pages
         optional bool search
 
+        # If true, let the model read emails and draft emails for user approval
+        optional bool email
+
         # Attached files [{name, type, data}] - at most 10 files
         optional ConversationFile[len <= 10] files
 
     errors
         ConversationBusy
+        UnknownConversationID
+
+
+# Confirm or discard a model-drafted email
+action sendEmail
+    urls
+        POST
+
+    input
+        # The conversation identifier
+        string id
+
+        # If false, discard the draft without sending (the default is true, send)
+        optional bool send
+
+    output
+        # True if the email was sent, false if the draft was discarded
+        bool sent
+
+    errors
+        NoEmailDraft
+        SendFailed
         UnknownConversationID
 
 

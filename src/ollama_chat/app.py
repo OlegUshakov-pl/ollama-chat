@@ -24,6 +24,7 @@ import urllib3
 import schema_markdown
 
 from .chat import ChatManager, config_conversation, config_template_prompts
+from .email_tools import send_email as smtp_send_email
 from .memory import (
     MEMORY_BACKUP_SUFFIX, MEMORY_FILENAME, USER_MEMORY_FILENAME, daily_file_path, ensure_workspace,
     memory_file_path, workspace_dir
@@ -68,6 +69,7 @@ class OllamaChat(chisel.Application):
         self.add_request(move_template)
         self.add_request(regenerate_conversation_exchange)
         self.add_request(reply_conversation)
+        self.add_request(send_email_request)
         self.add_request(set_conversation_title)
         self.add_request(set_model)
         self.add_request(set_workspace)
@@ -361,7 +363,8 @@ def start_conversation(ctx, req):
         # Start the model chat
         ctx.app.chats[id_] = ChatManager(
             ctx.app, id_, [user_prompt],
-            think=req.get('think', False), files=req.get('files'), search=req.get('search', False)
+            think=req.get('think', False), files=req.get('files'),
+            search=req.get('search', False), email=req.get('email', False)
         )
 
         # Return the new conversation identifier
@@ -511,8 +514,47 @@ def reply_conversation(ctx, req):
         # Start the model chat
         ctx.app.chats[id_] = ChatManager(
             ctx.app, id_, [req['user']],
-            think=req.get('think', False), files=req.get('files'), search=req.get('search', False)
+            think=req.get('think', False), files=req.get('files'),
+            search=req.get('search', False), email=req.get('email', False)
         )
+
+
+@chisel.action(name='sendEmail', types=OLLAMA_CHAT_TYPES)
+def send_email_request(ctx, req):
+    with ctx.app.config() as config:
+        conversation = config_conversation(config, req['id'])
+        if conversation is None:
+            raise chisel.ActionError('UnknownConversationID')
+        exchange = conversation['exchanges'][-1]
+        draft = exchange.get('email')
+        if not draft:
+            raise chisel.ActionError('NoEmailDraft')
+        to, subject, body = draft['to'], draft['subject'], draft['body']
+
+    # Discard the draft without sending?
+    if not req.get('send', True):
+        with ctx.app.config(save=True) as config:
+            conversation = config_conversation(config, req['id'])
+            if conversation and conversation['exchanges']:
+                exchange = conversation['exchanges'][-1]
+                email_draft = exchange.get('email')
+                if email_draft and email_draft.get('to') == to:
+                    del exchange['email']
+        return {'sent': False}
+
+    # Send the email, outside the config lock, and mark the draft as sent
+    try:
+        smtp_send_email(to, subject, body)
+    except ValueError as exc:
+        raise chisel.ActionError('SendFailed', str(exc)) from None
+    with ctx.app.config(save=True) as config:
+        conversation = config_conversation(config, req['id'])
+        if conversation and conversation['exchanges']:
+            exchange = conversation['exchanges'][-1]
+            email_draft = exchange.get('email')
+            if email_draft and email_draft.get('to') == to:
+                email_draft['sent'] = True
+    return {'sent': True}
 
 
 @chisel.action(name='setConversationTitle', types=OLLAMA_CHAT_TYPES)
