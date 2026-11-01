@@ -406,7 +406,7 @@ def start_template(ctx, req):
         # Start the model chat
         ctx.app.chats[id_] = ChatManager(
             ctx.app, id_, prompts,
-            think=req.get('think', False), files=req.get('files'), search=req.get('search', False)
+            think=req.get('think', False), files=req.get('files'), search=req.get('search', False), email=req.get('email', False)
         )
 
         # Return the new conversation identifier

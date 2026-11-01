@@ -1157,7 +1157,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Hello'], think=False, files=None, search=False)
+            mock_manager.assert_called_once_with(app, response['id'], ['Hello'], think=False, files=None, search=False, email=False)
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1191,7 +1191,7 @@ class TestAPI(unittest.TestCase):
             self.assertEqual(status, '200 OK')
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
-            mock_manager.assert_called_once_with(app, response['id'], ['Hello'], think=True, files=None, search=True)
+            mock_manager.assert_called_once_with(app, response['id'], ['Hello'], think=True, files=None, search=True, email=False)
 
 
     def test_start_conversation_model(self):
@@ -1208,7 +1208,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Hello'], think=False, files=None, search=False)
+            mock_manager.assert_called_once_with(app, response['id'], ['Hello'], think=False, files=None, search=False, email=False)
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1238,7 +1238,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], [prompt], think=False, files=None, search=False)
+            mock_manager.assert_called_once_with(app, response['id'], [prompt], think=False, files=None, search=False, email=False)
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1299,7 +1299,7 @@ class TestAPI(unittest.TestCase):
             self.assertEqual(status, '200 OK')
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Hello'], think=False, files=files, search=False)
+            mock_manager.assert_called_once_with(app, response['id'], ['Hello'], think=False, files=files, search=False, email=False)
             mock_manager.reset_mock()
 
             # Attach one file too many
@@ -1332,7 +1332,7 @@ class TestAPI(unittest.TestCase):
             status, headers, content_bytes = app.request('POST', '/replyConversation', wsgi_input=json.dumps(request).encode('utf-8'))
             self.assertEqual(status, '200 OK')
             self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {})
-            mock_manager.assert_called_once_with(app, 'conv1', ['How are you?'], think=False, files=files, search=False)
+            mock_manager.assert_called_once_with(app, 'conv1', ['How are you?'], think=False, files=files, search=False, email=False)
             mock_manager.reset_mock()
 
             # Reply with one file too many
@@ -1406,7 +1406,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None, search=False)
+            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None, search=False, email=False)
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1450,7 +1450,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None, search=False)
+            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None, search=False, email=False)
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1493,7 +1493,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None, search=False)
+            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None, search=False, email=False)
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -2084,7 +2084,7 @@ class TestAPI(unittest.TestCase):
             self.assertEqual(status, '200 OK')
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {})
-            mock_manager.assert_called_once_with(app, 'conv1', ['How are you?'], think=False, files=None, search=False)
+            mock_manager.assert_called_once_with(app, 'conv1', ['How are you?'], think=False, files=None, search=False, email=False)
             self.assertIs(app.chats['conv1'], mock_manager.return_value)
 
             # Verify the app config
@@ -2116,7 +2116,7 @@ class TestAPI(unittest.TestCase):
             self.assertEqual(status, '200 OK')
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {})
-            mock_manager.assert_called_once_with(app, 'conv1', ['How are you?'], think=True, files=None, search=True)
+            mock_manager.assert_called_once_with(app, 'conv1', ['How are you?'], think=True, files=None, search=True, email=False)
 
 
     def test_reply_conversation_unknown_id(self):
