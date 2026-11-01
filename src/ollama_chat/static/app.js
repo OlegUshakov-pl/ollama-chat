@@ -388,6 +388,10 @@ async function exportCurrentChatPdf() {
         const data = await apiPost('exportPdf', { id: state.route.id });
         state.notice = `${STRINGS.pdfExported} ${data.file}`;
         render();
+        const box = messagesBox();
+        if (box) {
+            box.scrollTop = 0;
+        }
     } catch (err) {
         state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
         render();

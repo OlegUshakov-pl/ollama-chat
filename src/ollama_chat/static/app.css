@@ -196,7 +196,7 @@ svg.icon-small { width: 16px; height: 16px; }
 .tool-calls-body[hidden] { display: none; }
 .tool-call { display: flex; align-items: baseline; gap: 8px; overflow-wrap: anywhere; }
 .msg-actions { display: flex; gap: 4px; margin-top: 6px; }
-.action-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; }
+.action-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; position: relative; z-index: 2; pointer-events: auto; }
 .action-btn:hover { background: var(--accent-soft); color: var(--accent); }
 .action-btn.copied { color: var(--accent); }
 .codeblock { border: 1px solid var(--border); background: var(--code-bg); margin: 14px 0; overflow: hidden; border-radius: var(--radius); }
