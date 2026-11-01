@@ -72,6 +72,30 @@ async function ollamaChatIndexPage(args, conversationsResponse):
         formsLinkButtonElements('Add Template', ollamaChatIndexOnAddTemplate) \
     ]})
 
+    # Render the workspace
+    workspace = objectGet(conversationsResponse, 'workspace')
+    markdownPrint('', '## Workspace')
+    if action == 'workspace':
+        workspaceChangeFn = ollamaChatIndexOnWorkspace
+        elementModelRender([ \
+            {'html': 'p', 'attr': {'style': 'white-space: pre-wrap;'}, 'elem': {'text': if(workspace != null, workspace, '')}}, \
+            {'html': 'p', 'elem': formsTextElements(ollamaChatWorkspaceInputID, workspace, 50, workspaceChangeFn)}, \
+            {'html': 'p', 'elem': [ \
+                formsLinkElements('Cancel', argsURL(ollamaChatArguments)), \
+                {'text': spacer + '|' + spacer}, \
+                formsLinkButtonElements('Update', workspaceChangeFn) \
+            ]} \
+        ])
+        documentSetFocus(ollamaChatWorkspaceInputID)
+    else:
+        markdownPrint( \
+            '', \
+            '**Workspace:** ' + markdownEscape(if(workspace != null, workspace, 'not configured')), \
+            '', \
+            argsLink(ollamaChatArguments, 'Change', {'action': 'workspace'}) \
+        )
+    endif
+
     # Render the conversations
     conversations = objectGet(conversationsResponse, 'conversations')
     anyGenerating = false
@@ -217,6 +241,23 @@ async function ollamaChatIndexOnAddTemplate():
     if templateID != null:
         windowSetLocation(argsURL(ollamaChatArguments, {'id': templateID, 'view': 'template'}))
     endif
+endfunction
+
+
+# The workspace change input ID
+ollamaChatWorkspaceInputID = 'ollama-chat-workspace-input'
+
+
+# Workspace change on-click event handler
+async function ollamaChatIndexOnWorkspace():
+    # Update the workspace
+    path = stringTrim(documentInputValue(ollamaChatWorkspaceInputID))
+    if path:
+        systemFetch({'url': 'setWorkspace', 'body': jsonStringify({'path': path})})
+    endif
+
+    # Navigate back to the index page
+    windowSetLocation(argsURL(ollamaChatArguments))
 endfunction
 
 

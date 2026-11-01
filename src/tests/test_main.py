@@ -38,6 +38,7 @@ class TestMain(unittest.TestCase):
              unittest.mock.patch('threading.Thread') as mock_thread, \
              unittest.mock.patch('webbrowser.open') as mock_open, \
              unittest.mock.patch('waitress.serve') as mock_serve, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': 'workspace-test'}), \
              unittest.mock.patch('sys.stdout', StringIO()) as stdout, \
              unittest.mock.patch('sys.stderr', StringIO()) as stderr:
 
@@ -66,7 +67,7 @@ class TestMain(unittest.TestCase):
             response = json.loads(application_wrap(environ, start_response)[0].decode('utf-8'))
 
             self.assertListEqual(start_response_calls, [('200 OK', [('Content-Type', 'application/json')])])
-            self.assertDictEqual(response, {'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': 'workspace-test', 'conversations': [], 'templates': []})
 
             self.assertEqual(
                 stdout.getvalue(),
@@ -84,6 +85,7 @@ ollama-chat: 200 GET /getConversations\x20
              unittest.mock.patch('threading.Thread') as mock_thread, \
              unittest.mock.patch('webbrowser.open') as mock_open, \
              unittest.mock.patch('waitress.serve') as mock_serve, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': 'workspace-test'}), \
              unittest.mock.patch('sys.stdout', StringIO()) as stdout, \
              unittest.mock.patch('sys.stderr', StringIO()) as stderr:
 
@@ -112,7 +114,7 @@ ollama-chat: 200 GET /getConversations\x20
             response = json.loads(application_wrap(environ, start_response)[0].decode('utf-8'))
 
             self.assertListEqual(start_response_calls, [('200 OK', [('Content-Type', 'application/json')])])
-            self.assertDictEqual(response, {'model': 'llm', 'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': 'workspace-test', 'model': 'llm', 'conversations': [], 'templates': []})
 
             self.assertEqual(
                 stdout.getvalue(),
@@ -129,6 +131,7 @@ ollama-chat: 200 GET /getConversations\x20
              unittest.mock.patch('threading.Thread') as mock_thread, \
              unittest.mock.patch('webbrowser.open') as mock_open, \
              unittest.mock.patch('waitress.serve') as mock_serve, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}), \
              unittest.mock.patch('sys.stdout', StringIO()) as stdout, \
              unittest.mock.patch('sys.stderr', StringIO()) as stderr:
 
@@ -153,7 +156,7 @@ ollama-chat: 200 GET /getConversations\x20
             response = json.loads(application_wrap(environ, start_response)[0].decode('utf-8'))
 
             self.assertListEqual(start_response_calls, [('200 OK', [('Content-Type', 'application/json')])])
-            self.assertDictEqual(response, {'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': temp_dir, 'conversations': [], 'templates': []})
 
             self.assertEqual(
                 stdout.getvalue(),
@@ -173,11 +176,11 @@ ollama-chat: 200 GET /getConversations\x20
              unittest.mock.patch('threading.Thread') as mock_thread, \
              unittest.mock.patch('webbrowser.open') as mock_open, \
              unittest.mock.patch('waitress.serve') as mock_serve, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}), \
              unittest.mock.patch('sys.stdout', StringIO()) as stdout, \
              unittest.mock.patch('sys.stderr', StringIO()) as stderr:
 
             main(['-c', temp_dir])
-
             mock_thread.assert_called_once_with(target=mock_open, args=('http://127.0.0.1:8080/',))
             thread_instance = mock_thread.return_value
             self.assertTrue(thread_instance.daemon)
@@ -197,7 +200,7 @@ ollama-chat: 200 GET /getConversations\x20
             response = json.loads(application_wrap(environ, start_response)[0].decode('utf-8'))
 
             self.assertListEqual(start_response_calls, [('200 OK', [('Content-Type', 'application/json')])])
-            self.assertDictEqual(response, {'model': 'llm', 'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': temp_dir, 'model': 'llm', 'conversations': [], 'templates': []})
 
             self.assertEqual(
                 stdout.getvalue(),
@@ -217,6 +220,7 @@ ollama-chat: 200 GET /getConversations\x20
              unittest.mock.patch('threading.Thread') as mock_thread, \
              unittest.mock.patch('webbrowser.open') as mock_open, \
              unittest.mock.patch('waitress.serve') as mock_serve, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}), \
              unittest.mock.patch('sys.stdout', StringIO()) as stdout, \
              unittest.mock.patch('sys.stderr', StringIO()) as stderr:
 
@@ -241,7 +245,7 @@ ollama-chat: 200 GET /getConversations\x20
             response = json.loads(application_wrap(environ, start_response)[0].decode('utf-8'))
 
             self.assertListEqual(start_response_calls, [('200 OK', [('Content-Type', 'application/json')])])
-            self.assertDictEqual(response, {'model': 'llm', 'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': temp_dir, 'model': 'llm', 'conversations': [], 'templates': []})
 
             self.assertEqual(
                 stdout.getvalue(),
@@ -258,6 +262,7 @@ ollama-chat: 200 GET /getConversations\x20
              unittest.mock.patch('threading.Thread') as mock_thread, \
              unittest.mock.patch('webbrowser.open') as mock_open, \
              unittest.mock.patch('waitress.serve') as mock_serve, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}), \
              unittest.mock.patch('sys.stdout', StringIO()) as stdout, \
              unittest.mock.patch('sys.stderr', StringIO()) as stderr:
 
@@ -282,7 +287,7 @@ ollama-chat: 200 GET /getConversations\x20
             response = json.loads(application_wrap(environ, start_response)[0].decode('utf-8'))
 
             self.assertListEqual(start_response_calls, [('200 OK', [('Content-Type', 'application/json')])])
-            self.assertDictEqual(response, {'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': temp_dir, 'conversations': [], 'templates': []})
 
             self.assertEqual(stdout.getvalue(), '')
             self.assertEqual(stderr.getvalue(), '')

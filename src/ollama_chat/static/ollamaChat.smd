@@ -174,6 +174,13 @@ struct OllamaChatConfig
     # The conversation templates
     optional ConversationTemplate[] templates
 
+    # The workspace directory. If not set, the default is the environment variable
+    # OLLAMA_CHAT_WORKSPACE, or "~/ollama-chat-workspace".
+    optional string workspace
+
+    # The workspace memory character limit (default is 3000)
+    optional int memoryLimit
+
     # If true, don't save the config file
     optional bool noSave
 
@@ -243,6 +250,26 @@ action getConversations
 
         # The conversation templates
         ConversationTemplateInfo[] templates
+
+        # The workspace directory
+        string workspace
+
+
+# Set the workspace directory
+action setWorkspace
+    urls
+        POST
+
+    input
+        # The workspace directory path
+        string path
+
+    output
+        # The workspace directory
+        string workspace
+
+    errors
+        BadWorkspace
 
 
 # Set the current model ID

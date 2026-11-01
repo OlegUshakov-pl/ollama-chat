@@ -67,6 +67,8 @@ async function testOllamaChatIndex():
                 ] \
             } \
         ]], \
+        ['markdownPrint', ['','## Workspace']], \
+        ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
         ['markdownPrint', ['','## Conversations']], \
         ['elementModelRender', [ \
             [ \
@@ -156,6 +158,105 @@ unittestRunTest('testOllamaChatIndexOnAddTemplateNull')
 
 
 #
+# ollamaChatIndexPage workspace form
+#
+
+
+async function testOllamaChatIndexWorkspaceForm():
+    # action == 'workspace' renders the workspace change form
+    systemGlobalSet('vAction', 'workspace')
+    args = argsParse(ollamaChatArguments)
+    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({ \
+        'model': 'm:1', 'workspace': 'C:\\ws', 'conversations': [], 'templates': [] \
+    })}})
+    ollamaChatIndexPage(args)
+    systemGlobalSet('vAction', null)
+    unittestDeepEqual(unittestMockEnd(), [ \
+        ['systemFetch', ['getConversations']], \
+        ['documentSetTitle', ['Ollama Chat']], \
+        ['markdownPrint', ['# Ollama Chat']], \
+        ['markdownPrint', ['**Current Model:** m:1']], \
+        ['elementModelRender', [testOllamaChatIndexMenuElements]], \
+        ['markdownPrint', ['','## Workspace']], \
+        ['elementModelRender', [ \
+            [ \
+                {'html': 'p', 'attr': {'style': 'white-space: pre-wrap;'}, 'elem': {'text': 'C:\\ws'}}, \
+                {'html': 'p', 'elem': { \
+                    'html': 'input', \
+                    'attr': { \
+                        'autocomplete': 'off', \
+                        'id': 'ollama-chat-workspace-input', \
+                        'size': 50, \
+                        'style': 'font-size: inherit; border: thin solid black; padding: 0.4em;', \
+                        'type': 'text', \
+                        'value': 'C:\\ws' \
+                    }, \
+                    'callback': {'keyup': '<function>'} \
+                }}, \
+                {'html': 'p', 'elem': [ \
+                    formsLinkElements('Cancel', '#var='), \
+                    {'text': '\u00a0\u00a0|\u00a0\u00a0'}, \
+                    formsLinkButtonElements('Update', '<function>') \
+                ]} \
+            ] \
+        ]], \
+        ['documentSetFocus', ['ollama-chat-workspace-input']], \
+        ['markdownPrint', ['','## Conversations']], \
+        ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
+        ['markdownPrint', ['','## Templates']], \
+        ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No templates*']] \
+    ])
+endfunction
+unittestRunTest('testOllamaChatIndexWorkspaceForm')
+
+
+#
+# ollamaChatIndexOnWorkspace
+#
+
+
+async function testOllamaChatIndexOnWorkspaceEmpty():
+    # Empty input - no setWorkspace call, just navigate back to the index page
+    unittestMockAll({'documentInputValue': {'ollama-chat-workspace-input': ''}})
+    ollamaChatIndexOnWorkspace()
+    unittestDeepEqual(unittestMockEnd(), [ \
+        ['documentInputValue', ['ollama-chat-workspace-input']], \
+        ['windowSetLocation', ['#var=']] \
+    ])
+endfunction
+unittestRunTest('testOllamaChatIndexOnWorkspaceEmpty')
+
+
+async function testOllamaChatIndexOnWorkspaceSet():
+    unittestMockAll({ \
+        'systemFetch': {'setWorkspace': jsonStringify({'workspace': 'C:\\ws2'})}, \
+        'documentInputValue': {'ollama-chat-workspace-input': 'C:\\ws2'} \
+    })
+    ollamaChatIndexOnWorkspace()
+    unittestDeepEqual(unittestMockEnd(), [ \
+        ['documentInputValue', ['ollama-chat-workspace-input']], \
+        ['systemFetch', [{'url': 'setWorkspace', 'body': '{"path":"C:\\\\ws2"}'}]], \
+        ['windowSetLocation', ['#var=']] \
+    ])
+endfunction
+unittestRunTest('testOllamaChatIndexOnWorkspaceSet')
+
+
+async function testOllamaChatIndexWorkspaceBinding():
+    # The form's Update button must be bound to the workspace change handler
+    systemGlobalSet('vAction', 'workspace')
+    args = argsParse(ollamaChatArguments)
+    render = systemPartial(ollamaChatIndexPage, args)
+    data = {'systemFetch': {'getConversations': jsonStringify({ \
+        'model': 'm:1', 'workspace': 'C:\\ws', 'conversations': [], 'templates': [] \
+    })}}
+    ollamaChatTestVerifyClick(render, 'Update', ollamaChatIndexOnWorkspace, data)
+    systemGlobalSet('vAction', null)
+endfunction
+unittestRunTest('testOllamaChatIndexWorkspaceBinding')
+
+
+#
 # ollamaChatIndexOnConversationAction
 #
 
@@ -193,6 +294,8 @@ async function testOllamaChatIndexOnConversationActionMove():
         ['markdownPrint', ['# Ollama Chat']], \
         ['markdownPrint', ['**Current Model:** m:1']], \
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
+        ['markdownPrint', ['','## Workspace']], \
+        ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
         ['markdownPrint', ['','## Conversations']], \
         ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
         ['markdownPrint', ['','## Templates']], \
@@ -240,6 +343,8 @@ async function testOllamaChatIndexOnTemplateActionMove():
         ['markdownPrint', ['# Ollama Chat']], \
         ['markdownPrint', ['**Current Model:** m:1']], \
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
+        ['markdownPrint', ['','## Workspace']], \
+        ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
         ['markdownPrint', ['','## Conversations']], \
         ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
         ['markdownPrint', ['','## Templates']], \
@@ -356,6 +461,8 @@ async function testOllamaChatIndexEmpty():
         ['markdownPrint', ['# Ollama Chat']], \
         ['markdownPrint', ['**Current Model:** m:1']], \
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
+        ['markdownPrint', ['','## Workspace']], \
+        ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
         ['markdownPrint', ['','## Conversations']], \
         ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
         ['markdownPrint', ['','## Templates']], \
@@ -376,6 +483,8 @@ async function testOllamaChatIndexGenerating():
         ['markdownPrint', ['# Ollama Chat']], \
         ['markdownPrint', ['**Current Model:** m:1']], \
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
+        ['markdownPrint', ['','## Workspace']], \
+        ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
         ['markdownPrint', ['','## Conversations']], \
         ['elementModelRender', [ \
             [ \
@@ -458,6 +567,8 @@ async function testOllamaChatIndexOnTimeoutRerender():
         ['markdownPrint', ['# Ollama Chat']], \
         ['markdownPrint', ['**Current Model:** m:1']], \
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
+        ['markdownPrint', ['','## Workspace']], \
+        ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
         ['markdownPrint', ['','## Conversations']], \
         ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
         ['markdownPrint', ['','## Templates']], \
@@ -494,6 +605,8 @@ async function testOllamaChatIndexConversationSelected():
         ['markdownPrint', ['# Ollama Chat']], \
         ['markdownPrint', ['**Current Model:** m:1']], \
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
+        ['markdownPrint', ['','## Workspace']], \
+        ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
         ['markdownPrint', ['','## Conversations']], \
         ['elementModelRender', [ \
             [ \
@@ -559,6 +672,8 @@ async function testOllamaChatIndexTemplateSelected():
         ['markdownPrint', ['# Ollama Chat']], \
         ['markdownPrint', ['**Current Model:** m:1']], \
         ['elementModelRender', [testOllamaChatIndexMenuElements]], \
+        ['markdownPrint', ['','## Workspace']], \
+        ['markdownPrint', ['','**Workspace:** not configured','',"[Change](#var.vAction='workspace')"]], \
         ['markdownPrint', ['','## Conversations']], \
         ['markdownPrint', ['','\u00a0\u00a0\u00a0\u00a0' + '*No conversations*']], \
         ['markdownPrint', ['','## Templates']], \

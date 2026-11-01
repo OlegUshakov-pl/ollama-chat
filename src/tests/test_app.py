@@ -58,13 +58,14 @@ class TestApp(unittest.TestCase):
                     'replyConversation',
                     'setConversationTitle',
                     'setModel',
+                    'setWorkspace',
                     'startConversation',
                     'startTemplate',
                     'stopConversation',
                     'stopModelDownload',
                     'updateTemplate',
                     'vendor/marked.min.js',
-                    'vendor/purify.min.js',
+                    'vendor/purify.min.js'
                 ]
             )
 
@@ -105,6 +106,7 @@ class TestApp(unittest.TestCase):
                     'replyConversation',
                     'setConversationTitle',
                     'setModel',
+                    'setWorkspace',
                     'startConversation',
                     'startTemplate',
                     'stopConversation',
@@ -299,7 +301,8 @@ class TestDownloadManager(unittest.TestCase):
 class TestAPI(unittest.TestCase):
 
     def test_xorigin(self):
-        with create_test_files([]) as temp_dir:
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
             config_path = os.path.join(temp_dir, 'ollama-chat.json')
             app = OllamaChat(config_path, xorigin=True)
 
@@ -307,7 +310,7 @@ class TestAPI(unittest.TestCase):
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertEqual(status, '200 OK')
             self.assertListEqual(headers, [('Content-Type', 'application/json'), ('Access-Control-Allow-Origin', '*')])
-            self.assertDictEqual(response, {'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': temp_dir, 'conversations': [], 'templates': []})
 
             # Verify the app config
             with app.config() as config:
@@ -321,7 +324,8 @@ class TestAPI(unittest.TestCase):
         test_files = [
             ('ollama-chat.json', json.dumps({'model': 'llm', 'conversations': []}))
         ]
-        with create_test_files(test_files) as temp_dir:
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
             config_path = os.path.join(temp_dir, 'ollama-chat.json')
             app = OllamaChat(config_path)
 
@@ -329,7 +333,10 @@ class TestAPI(unittest.TestCase):
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertEqual(status, '200 OK')
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
-            self.assertDictEqual(response, {'model': 'llm', 'conversations': [], 'templates': []})
+            self.assertDictEqual( \
+                response, \
+                {'workspace': temp_dir, 'model': 'llm', 'conversations': [], 'templates': []} \
+            )
 
             # Verify the app config
             expected_config = {'model': 'llm', 'conversations': []}
@@ -342,7 +349,8 @@ class TestAPI(unittest.TestCase):
 
 
     def test_get_conversations_no_model(self):
-        with create_test_files([]) as temp_dir:
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
             config_path = os.path.join(temp_dir, 'ollama-chat.json')
             app = OllamaChat(config_path)
 
@@ -350,7 +358,7 @@ class TestAPI(unittest.TestCase):
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertEqual(status, '200 OK')
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
-            self.assertDictEqual(response, {'conversations': [], 'templates': []})
+            self.assertDictEqual(response, {'workspace': temp_dir, 'conversations': [], 'templates': []})
 
             # Verify the app config
             with app.config() as config:
@@ -358,6 +366,74 @@ class TestAPI(unittest.TestCase):
 
             # Verify the config file
             self.assertFalse(os.path.exists(config_path))
+
+
+    def test_set_workspace(self):
+        with unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': 'default-workspace'}):
+            with create_test_files([]) as temp_dir:
+                config_path = os.path.join(temp_dir, 'ollama-chat.json')
+                app = OllamaChat(config_path)
+                workspace = os.path.join(temp_dir, 'my-workspace')
+
+                status, headers, content_bytes = app.request( \
+                    'POST', '/setWorkspace', wsgi_input=json.dumps({'path': workspace}).encode('utf-8') \
+                )
+                response = json.loads(content_bytes.decode('utf-8'))
+                self.assertEqual(status, '200 OK')
+                self.assertListEqual(headers, [('Content-Type', 'application/json')])
+                self.assertDictEqual(response, {'workspace': workspace})
+
+                # The workspace and its memory files are created, and the config file is updated
+                self.assertTrue(os.path.isfile(os.path.join(workspace, 'memory', 'USER.md')))
+                self.assertTrue(os.path.isfile(os.path.join(workspace, 'memory', 'MEMORY.md')))
+                self.assertTrue(os.path.exists(workspace))
+
+                expected_config = {'workspace': workspace, 'conversations': []}
+                with app.config() as config:
+                    self.assertDictEqual(config, expected_config)
+                with open(config_path, 'r', encoding='utf-8') as config_fh:
+                    self.assertDictEqual(json.load(config_fh), expected_config)
+
+                # The workspace is used for the memory files
+                from ollama_chat.memory import read_memory_file  # pylint: disable=import-outside-toplevel
+                self.assertIn('# Memory', read_memory_file(workspace, 'MEMORY.md'))
+
+
+    def test_set_workspace_test(self):
+        # A relative workspace path resolves to an absolute path
+        with create_test_files([]) as temp_dir:
+            old_cwd = os.getcwd()
+            os.chdir(temp_dir)
+            try:
+                config_path = os.path.join(temp_dir, 'ollama-chat.json')
+                app = OllamaChat(config_path)
+
+                status, headers, content_bytes = app.request( \
+                    'POST', '/setWorkspace', wsgi_input=json.dumps({'path': 'relative-ws'}).encode('utf-8') \
+                )
+                response = json.loads(content_bytes.decode('utf-8'))
+                self.assertEqual(status, '200 OK')
+                self.assertListEqual(headers, [('Content-Type', 'application/json')])
+                self.assertDictEqual(response, {'workspace': os.path.join(temp_dir, 'relative-ws')})
+            finally:
+                os.chdir(old_cwd)
+
+
+    def test_set_workspace_bad(self):
+        # Unwritable workspace paths return an error
+        with create_test_files([]) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            bad_path = os.path.join(temp_dir, 'blocked-ws')
+
+            with unittest.mock.patch('ollama_chat.app.ensure_workspace', side_effect=OSError('permission denied')):
+                status, headers, content_bytes = app.request( \
+                    'POST', '/setWorkspace', wsgi_input=json.dumps({'path': bad_path}).encode('utf-8') \
+                )
+            self.assertEqual(status, '400 Bad Request')
+            self.assertListEqual(headers, [('Content-Type', 'application/json')])
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(response['error'], 'BadWorkspace')
 
 
     def test_set_model(self):

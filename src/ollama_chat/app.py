@@ -10,6 +10,7 @@ import copy
 import ctypes
 import json
 import os
+import pathlib
 from functools import partial
 import platform
 import importlib.resources
@@ -22,6 +23,7 @@ import urllib3
 import schema_markdown
 
 from .chat import ChatManager, config_conversation, config_template_prompts
+from .memory import ensure_workspace, workspace_dir
 from .ollama import ollama_delete, ollama_list, ollama_pull
 
 
@@ -60,6 +62,7 @@ class OllamaChat(chisel.Application):
         self.add_request(reply_conversation)
         self.add_request(set_conversation_title)
         self.add_request(set_model)
+        self.add_request(set_workspace)
         self.add_request(start_conversation)
         self.add_request(start_template)
         self.add_request(stop_conversation)
@@ -193,6 +196,7 @@ with importlib.resources.files('ollama_chat.static').joinpath('ollamaChat.smd').
 def get_conversations(ctx, unused_req):
     with ctx.app.config() as config:
         response = {
+            'workspace': str(workspace_dir(config)),
             'conversations': [
                 {
                     'id': conversation['id'],
@@ -219,6 +223,21 @@ def get_conversations(ctx, unused_req):
 def set_model(ctx, req):
     with ctx.app.config(save=True) as config:
         config['model'] = req['model']
+
+
+# Set the workspace directory, creating it (and its memory directory) if it doesn't exist
+@chisel.action(name='setWorkspace', types=OLLAMA_CHAT_TYPES)
+def set_workspace(ctx, req):
+    workspace = pathlib.Path(req['path']).expanduser()
+    try:
+        ensure_workspace(workspace)
+    except OSError as exc:
+        raise chisel.ActionError('BadWorkspace', f'Failed to create workspace "{req["path"]}" ({exc})') from None
+
+    # Resolve a relative path to an absolute path for display
+    with ctx.app.config(save=True) as config:
+        config['workspace'] = str(workspace.resolve())
+        return {'workspace': str(workspace_dir(config))}
 
 
 @chisel.action(name='moveConversation', types=OLLAMA_CHAT_TYPES)

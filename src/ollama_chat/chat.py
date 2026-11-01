@@ -19,6 +19,10 @@ import threading
 
 import urllib3
 
+from .memory import ( # pylint: disable=unused-import
+    MEMORY_LIMIT_DEFAULT, MEMORY_FILENAME, USER_MEMORY_FILENAME,
+    find_memory_lines, forget, memory_context, memory_file_path, read_memory_file, remember, workspace_dir
+)
 from .ollama import ollama_chat, ollama_show
 from .web_tools import SEARCH_MAX_RESULTS, WEB_TOOLS, fetch_page, web_search
 
@@ -77,6 +81,9 @@ class ChatManager():
     def chat_thread_fn(chat):
         try:
             while chat.prompts:
+                # The current turn's prompt, used to select relevant memory lines
+                turn_prompt = chat.prompts[0]
+
                 # Create the Ollama messages from the conversation
                 messages = []
                 flags = {}
@@ -103,7 +110,7 @@ class ChatManager():
                     # Process user prompt commands append to messages (unless there's a "do" command)
                     for exchange in conversation['exchanges']:
                         flags = {}
-                        user_content = _process_commands(chat, exchange['user'], flags)
+                        user_content = _process_commands(chat, exchange['user'], flags, config)
                         if 'do' not in flags:
                             messages.append({'role': 'user', 'content': user_content, 'images': flags.get('images')})
                             if exchange['model'] != '':
@@ -157,6 +164,12 @@ class ChatManager():
                         exchange['model'] = user_content
                         continue
 
+                    # Command-generated reply (e.g. a memory command)?
+                    elif 'reply' in flags:
+                        exchange = conversation['exchanges'][-1]
+                        exchange['model'] = flags['reply']
+                        continue
+
                     # Do command?
                     elif 'do' in flags:
                         messages = []
@@ -182,6 +195,16 @@ class ChatManager():
                         exchange = conversation['exchanges'][-1]
                         exchange['model'] = '\n\n'.join(reversed(messages))
                         continue
+
+                    # Inject the workspace memory into the system prompt (all command-only
+                    # turns are answered above with "continue", so this is a model turn)
+                    memory_text = memory_context( \
+                        workspace_dir(config), \
+                        turn_prompt, \
+                        config.get('memoryLimit', MEMORY_LIMIT_DEFAULT) \
+                    )
+                    if memory_text:
+                        messages.insert(0, {'role': 'system', 'content': memory_text})
 
                 # Stream the chat response, executing the model's tool calls until it answers
                 tool_rounds = 0
@@ -337,23 +360,23 @@ def _run_tool(chat, tool_name, arguments):
 
 
 # Process prompt commands
-def _process_commands(chat, prompt, flags):
+def _process_commands(chat, prompt, flags, config=None):
     # Determine whether any command requests "show" mode (the whole prompt is rendered with
     # fenced content). This scan pass parses each command's arguments but performs no file or
     # URL I/O, so a "-n" command's content is read/fetched once below instead of twice.
     scan_flags = {}
-    _R_COMMAND.sub(functools.partial(_process_commands_sub, chat, scan_flags, True), prompt)
+    _R_COMMAND.sub(functools.partial(_process_commands_sub, chat, scan_flags, True, config), prompt)
     if 'show' in scan_flags:
         flags['show'] = True
 
     # Process the commands
-    return _R_COMMAND.sub(functools.partial(_process_commands_sub, chat, flags, False), prompt)
+    return _R_COMMAND.sub(functools.partial(_process_commands_sub, chat, flags, False, config), prompt)
 
-_R_COMMAND = re.compile(r'^/(?P<cmd>\?|dir|do|file|image|url)(?P<args> .*)?$', re.MULTILINE)
+_R_COMMAND = re.compile(r'^/(?P<cmd>\?|dir|do|file|forget|image|memory|remember|url)(?P<args> .*)?$', re.MULTILINE)
 
 
 # Command prompt regex substitution function
-def _process_commands_sub(chat, flags, scan, match):
+def _process_commands_sub(chat, flags, scan, config, match):
     # Parse command arguments
     command = match.group('cmd')
     argv = [command, *shlex.split(match.group('args') or '')]
@@ -369,6 +392,46 @@ def _process_commands_sub(chat, flags, scan, match):
 
     # The scan pass only collects rendering flags; skip all command I/O
     if scan:
+        return ''
+
+    # Show the memory files?
+    if command == 'memory':
+        workspace = workspace_dir(config)
+        workspace_str = str(workspace)
+        flags['reply'] = \
+            f'The workspace is `{workspace_str}`.\n\n' + \
+            _command_file_content(str(workspace / 'memory' / USER_MEMORY_FILENAME), \
+                read_memory_file(workspace, USER_MEMORY_FILENAME), True) + \
+            '\n' + _command_file_content(str(workspace / 'memory' / MEMORY_FILENAME), \
+                read_memory_file(workspace, MEMORY_FILENAME), True)
+        return ''
+
+    # Add a memory note?
+    elif command == 'remember':
+        text = ' '.join(args.text).strip()
+        remember(workspace_dir(config), text)
+        flags['reply'] = f'Remembered:\n\n```\n{text}\n```'
+        return ''
+
+    # Forget memory lines?
+    elif command == 'forget':
+        phrase = ' '.join(args.phrase).strip()
+        workspace = workspace_dir(config)
+        if args.confirm:
+            deleted = forget(workspace, phrase)
+            flags['reply'] = \
+                f'Deleted {deleted} memory line(s) matching "{phrase}". ' \
+                'The previous MEMORY.md is saved as MEMORY.md.bak.'
+        else:
+            matches = find_memory_lines(workspace, phrase)
+            if matches:
+                matches_text = '\n'.join(f'{ix + 1}: {line}' for ix, line in matches)
+                flags['reply'] = \
+                    f'Found {len(matches)} memory line(s) matching "{phrase}":\n\n```\n' + \
+                    _R_COMMAND_FENCE_ESCAPE.sub(r'\1\`\`\`', matches_text) + '\n```\n' + \
+                    'Confirm deletion with `/forget -y <phrase>`.'
+            else:
+                flags['reply'] = f'No memory lines match "{phrase}".'
         return ''
 
     # Include files from a directory?
@@ -503,6 +566,20 @@ _COMMAND_PARSER_URL = _COMMAND_SUBPARSERS.add_parser('url', add_help=False, exit
 _COMMAND_PARSER_URL.add_argument('url', help='the resource URL')
 _COMMAND_PARSER_URL.add_argument('-h', dest='help', action=CommandHelpAction, help='show help')
 _COMMAND_PARSER_URL.add_argument('-n', dest='show', action='store_true', help='respond with user prompt')
+
+_COMMAND_PARSER_FORGET = _COMMAND_SUBPARSERS.add_parser( \
+    'forget', add_help=False, exit_on_error=False, help='remove memory lines matching a phrase' \
+)
+_COMMAND_PARSER_FORGET.add_argument('phrase', nargs='+', metavar='PHRASE', help='the phrase to match')
+_COMMAND_PARSER_FORGET.add_argument('-h', dest='help', action=CommandHelpAction, help='show help')
+_COMMAND_PARSER_FORGET.add_argument('-y', dest='confirm', action='store_true', help='confirm the deletion')
+_COMMAND_PARSER_MEMORY = _COMMAND_SUBPARSERS.add_parser( \
+    'memory', add_help=False, exit_on_error=False, help='show the workspace memory files' \
+)
+_COMMAND_PARSER_MEMORY.add_argument('-h', dest='help', action=CommandHelpAction, help='show help')
+_COMMAND_PARSER_REMEMBER = _COMMAND_SUBPARSERS.add_parser('remember', add_help=False, exit_on_error=False, help='add a line to memory')
+_COMMAND_PARSER_REMEMBER.add_argument('text', nargs='+', metavar='TEXT', help='the text to remember')
+_COMMAND_PARSER_REMEMBER.add_argument('-h', dest='help', action=CommandHelpAction, help='show help')
 
 
 # Helper to produce file text content

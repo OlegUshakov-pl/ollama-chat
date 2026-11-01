@@ -18,6 +18,7 @@ from ollama_chat.chat import (
     _escape_markdown_text, _process_commands, _run_tool, _tool_call_arguments, _StreamTokenFilter,
     config_template_prompts, ChatManager
 )
+from ollama_chat.memory import memory_context
 from ollama_chat.web_tools import WEB_TOOLS
 
 from .util import create_test_files
@@ -43,6 +44,14 @@ def docx_data(*paragraphs):
 
 
 class TestChatManager(unittest.TestCase):
+
+    def setUp(self):
+        # Keep chat tests deterministic - isolate from any real workspace memory
+        env_patcher = unittest.mock.patch.dict(os.environ)
+        os.environ.pop('OLLAMA_CHAT_WORKSPACE', None)
+        self.addCleanup(env_patcher.stop)
+        env_patcher.start()
+
 
     def test_chat_fn(self):
         test_files = [
@@ -172,6 +181,68 @@ class TestChatManager(unittest.TestCase):
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
                 self.assertEqual(json.load(config_fh), expected_config)
+
+
+    def test_chat_fn_memory(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ]
+            })),
+            (('ws-memory', 'memory', 'USER.md'), 'The user likes tea.'),
+            (('ws-memory', 'memory', 'MEMORY.md'), '# Memory\n\nAny case: MAYBE likes tea\nlikes coffee\n')
+        ]
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': os.path.join(temp_dir, 'ws-memory')}), \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+
+            # Create a mock show response
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': []}
+
+            # Create a mock chat response
+            mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response.status = 200
+            mock_chat_response.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'You like tea.'}}).encode('utf-8')
+            ]
+
+            # Configure the mock pool manager instance
+            mock_pool_manager_instance = mock_pool_manager.return_value
+            mock_pool_manager_instance.request.side_effect = [mock_show_response, mock_chat_response]
+
+            # Create the ChatManager instance
+            chat_prompts = ['What do I like?']
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            chat_manager = ChatManager(app, 'conv1', chat_prompts)
+            app.chats['conv1'] = chat_manager
+
+            # Run the thread function
+            ChatManager.chat_thread_fn(chat_manager)
+
+            # Verify the ollama.chat calls - the memory context is injected as the system message
+            self.assertEqual(mock_pool_manager_instance.request.call_count, 2)
+            self.assertEqual( \
+                mock_pool_manager_instance.request.call_args_list[1], \
+                unittest.mock.call(
+                    'POST',
+                    'http://127.0.0.1:11434/api/chat',
+                    json={
+                        'model': 'llm',
+                        'messages': [
+                            {'role': 'system', 'content': memory_context(os.path.join(temp_dir, 'ws-memory'), 'What do I like?')},
+                            {'role': 'user', 'content': 'What do I like?', 'images': None}
+                        ],
+                        'stream': True,
+                        'think': False
+                    },
+                    preload_content=False,
+                    retries=0
+                )
+            )
 
 
     def test_chat_fn_files(self):
@@ -1030,7 +1101,7 @@ class TestChatManager(unittest.TestCase):
             }
             with app.config() as config:
                 exchange = config['conversations'][0]['exchanges'][0]
-                self.assertTrue(exchange['model'].startswith('```\nusage: /{?,dir,do,file,image,url}'))
+                self.assertTrue(exchange['model'].startswith('```\nusage: /{?,dir,do,file,image,url,forget,memory,remember}'))
                 del exchange['model']
                 self.assertDictEqual(config, expected_config)
 
@@ -1038,7 +1109,7 @@ class TestChatManager(unittest.TestCase):
             with open(config_path, 'r', encoding='utf-8') as config_fh:
                 config = json.load(config_fh)
                 exchange = config['conversations'][0]['exchanges'][0]
-                self.assertTrue(exchange['model'].startswith('```\nusage: /{?,dir,do,file,image,url}'))
+                self.assertTrue(exchange['model'].startswith('```\nusage: /{?,dir,do,file,image,url,forget,memory,remember}'))
                 del exchange['model']
                 self.assertEqual(config, expected_config)
 
@@ -1760,7 +1831,71 @@ class TestProcessCommands(unittest.TestCase):
     def test_help_top(self):
         flags = {}
         self.assertEqual(_process_commands(None, '/?', flags), 'Displaying top-level help')
-        self.assertTrue(flags['help'].startswith('usage: /{?,dir,do,file,image,url}'))
+        self.assertTrue(flags['help'].startswith('usage: /{?,dir,do,file,image,url,forget,memory,remember}'))
+
+
+    def test_memory_help(self):
+        flags = {}
+        self.assertEqual(_process_commands(None, '/remember -h', flags), 'Displaying help for "remember" command')
+        self.assertTrue(flags['help'].startswith('usage: /remember [-h] TEXT [TEXT ...]'))
+
+
+    def test_memory(self):
+        test_files = [
+            (('memory', 'USER.md'), 'The user likes tea.\n'),
+            (('memory', 'MEMORY.md'), '# Memory\n\nlikes tea\n')
+        ]
+        with create_test_files(test_files) as temp_dir:
+            flags = {}
+            _process_commands(None, '/memory', flags, {'workspace': temp_dir})
+            self.assertIn('The workspace is', flags['reply'])
+            self.assertIn('USER.md', flags['reply'])
+            self.assertIn('The user likes tea.', flags['reply'])
+            self.assertIn('MEMORY.md', flags['reply'])
+            self.assertIn('# Memory', flags['reply'])
+
+
+    def test_remember(self):
+        with create_test_files([]) as temp_dir:
+            flags = {}
+            self.assertEqual(_process_commands(None, '/remember  likes tea ', flags, {'workspace': temp_dir}), '')
+            self.assertDictEqual(flags, {'reply': 'Remembered:\n\n```\nlikes tea\n```'})
+
+            # The note is in the memory file
+            with open(os.path.join(temp_dir, 'memory', 'MEMORY.md'), 'r', encoding='utf-8') as memory_file:
+                self.assertIn('likes tea\n', memory_file.read())
+
+
+    def test_forget_list(self):
+        test_files = [
+            (('memory', 'MEMORY.md'), '# Memory\n\nAny case: MAYBE likes tea\nlikes coffee\n')
+        ]
+        with create_test_files(test_files) as temp_dir:
+            flags = {}
+            self.assertEqual(_process_commands(None, '/forget tea', flags, {'workspace': temp_dir}), '')
+            self.assertIn('Found 1 memory line(s) matching "tea"', flags['reply'])
+            self.assertIn('Any case: MAYBE likes tea', flags['reply'])
+            self.assertIn('Confirm deletion with `/forget -y <phrase>`', flags['reply'])
+
+            # Without a match
+            flags = {}
+            self.assertEqual(_process_commands(None, '/forget water', flags, {'workspace': temp_dir}), '')
+            self.assertDictEqual(flags, {'reply': 'No memory lines match "water".'})
+
+
+    def test_forget_confirm(self):
+        test_files = [
+            (('memory', 'MEMORY.md'), '# Memory\n\nAny case: MAYBE likes tea\nlikes coffee\n')
+        ]
+        with create_test_files(test_files) as temp_dir:
+            flags = {}
+            self.assertEqual(_process_commands(None, '/forget -y TEA', flags, {'workspace': temp_dir}), '')
+            self.assertIn('Deleted 1 memory line(s) matching "TEA"', flags['reply'])
+            self.assertIn('MEMORY.md.bak', flags['reply'])
+
+            # The line is deleted
+            with open(os.path.join(temp_dir, 'memory', 'MEMORY.md'), 'r', encoding='utf-8') as memory_file:
+                self.assertNotIn('tea', memory_file.read())
 
 
     def test_help(self):
