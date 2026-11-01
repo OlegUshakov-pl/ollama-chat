@@ -228,6 +228,14 @@ POST /exportPdf  {"file": "MEMORY.md"}           # <workspace>/memory/MEMORY.md
 POST /exportPdf  {"file": "daily/2026-01-15.md"} # <workspace>/memory/daily/YYYY-MM-DD.md
 ```
 
+### Interface and themes
+
+The UI uses a clean, minimal style (Jan AI / Claude Code inspired): flat panels with straight corners
+(`--radius: 0`), a warm light theme and a dark theme, a compact sidebar, a centered chat column,
+collapsible thinking and tool-call blocks, and code blocks with a copy button. Theme choice is persisted
+in `localStorage` and follows `prefers-color-scheme` by default. The sidebar collapses on mobile and
+opens via the menu button.
+
 ## Add a desktop launcher
 
 **macOS** — drag `ollama-chat` executable to Dock.
