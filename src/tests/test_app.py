@@ -476,16 +476,15 @@ class TestAPI(unittest.TestCase):
 
 
     def test_get_profile(self):
-        with unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': 'default-workspace'}):
-            with create_test_files([]) as temp_dir:
-                config_path = os.path.join(temp_dir, 'ollama-chat.json')
-                app = OllamaChat(config_path)
-                app.request('POST', '/setWorkspace', wsgi_input=json.dumps({'path': 'default-workspace'}).encode('utf-8'))
-                status, _headers, content_bytes = app.request('GET', '/getProfile')
-                response = json.loads(content_bytes.decode('utf-8'))
-                self.assertEqual(status, '200 OK')
-                self.assertEqual(response['limit'], 1500)
-                self.assertTrue(response['content'].startswith('# About the user'))
+        with create_test_files([]) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            app.request('POST', '/setWorkspace', wsgi_input=json.dumps({'path': os.path.join(temp_dir, 'ws')}).encode('utf-8'))
+            status, _headers, content_bytes = app.request('GET', '/getProfile')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertEqual(response['limit'], 1500)
+            self.assertTrue(response['content'].startswith('# About the user'))
 
 
     def test_set_profile(self):
