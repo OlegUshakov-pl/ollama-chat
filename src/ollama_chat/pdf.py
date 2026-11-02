@@ -9,8 +9,11 @@ letters and Latin-2 diacritics used by the chat, so no external font tooling or
 OS-specific printing stack is needed.
 """
 
+import logging
 import pathlib
 import re
+
+logging.getLogger('fpdf.output').setLevel(logging.ERROR)
 
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
