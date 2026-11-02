@@ -20,10 +20,11 @@ from .memory import MEMORY_LIMIT_DEFAULT, memory_context, workspace_dir
 from .ollama import ollama_chat, ollama_show
 
 
-# The tools available to scheduled tasks - read-only tools only, for safety. Tools that write
-# (like send_email, which also requires an explicit user confirmation in the UI) must never be
-# added here unless explicitly made opt-in by the user.
-TASK_TOOLS = ('web_search', 'fetch_page', 'check_email')
+# The tools a scheduled task may have in its tools list. The read-only tools are the default;
+# send_email is opt-in (unchecked by default in the tasks page) since a task sending email has
+# no user confirmation step.
+TASK_TOOLS = ('web_search', 'fetch_page', 'check_email', 'send_email')
+TASK_DEFAULT_TOOLS = ('web_search', 'fetch_page', 'check_email')
 
 
 def _task_web_tools():
@@ -31,6 +32,23 @@ def _task_web_tools():
     from .email_tools import EMAIL_TOOLS  # pylint: disable=import-outside-toplevel
     from .web_tools import WEB_TOOLS  # pylint: disable=import-outside-toplevel
     return [*WEB_TOOLS, *EMAIL_TOOLS]
+
+
+# Is a task enabled? (Tasks created before the enabled field, or with it unset, are enabled.)
+def task_enabled(task):
+    return task.get('enabled', True)
+
+
+# A task's tools list, as stored in tasks.json - None means the default read-only tools
+def _task_tool_names(tools):
+    if isinstance(tools, str):
+        tool_names = [tool.strip() for tool in tools.split(',') if tool.strip()]
+    else:
+        tool_names = [tool.strip() for tool in (tools or TASK_DEFAULT_TOOLS)]
+    unknown_tools = [tool for tool in tool_names if tool not in TASK_TOOLS]
+    if unknown_tools:
+        raise ValueError(f'unknown or disallowed task tool(s): {", ".join(unknown_tools)}')
+    return tool_names or list(TASK_DEFAULT_TOOLS)
 
 
 # The workspace task and log file names
@@ -69,18 +87,6 @@ def save_tasks(workspace, tasks):
     workspace_path.mkdir(parents=True, exist_ok=True)
     with open(tasks_path(workspace), 'w', encoding='utf-8') as tasks_fh:
         json.dump(tasks, tasks_fh, indent=4)
-
-
-# Normalize a task's tools argument - None means the default read-only tools
-def _task_tool_names(tools):
-    if isinstance(tools, str):
-        tool_names = [tool.strip() for tool in tools.split(',') if tool.strip()]
-    else:
-        tool_names = [tool.strip() for tool in (tools or TASK_TOOLS)]
-    unknown_tools = [tool for tool in tool_names if tool not in TASK_TOOLS]
-    if unknown_tools:
-        raise ValueError(f'unknown or disallowed task tool(s): {", ".join(unknown_tools)}')
-    return tool_names or list(TASK_TOOLS)
 
 
 # Generate a new, unique task ID from the task's name
@@ -142,6 +148,8 @@ def tasks_summary(tasks):
         line = \
             f'{ix + 1}. {task.get("id", "")} - "{task.get("name", "")}" - ' \
             f'{task.get("time", "")} {task_days_text(task.get("days"))} - model {task.get("model", "")}'
+        if not task_enabled(task):
+            line += ' (disabled)'
         if task.get('lastRun'):
             line += f' - last run {task["lastRun"]}'
         if task.get('lastError'):
@@ -161,15 +169,81 @@ def task_add(workspace, name, run_time, days, prompt, model, num_ctx=None, tools
         'days': sorted(days),
         'prompt': prompt,
         'model': model,
-        'num_ctx': num_ctx,
+        'num_ctx': _task_num_ctx(num_ctx),
         'tools': tool_names,
         'dest': dest,
+        'enabled': True,
         'lastRun': None,
         'lastError': None
     }
     tasks.append(task)
     save_tasks(workspace, tasks)
     return task['id']
+
+
+# Create or update a task, for the tasks page's setTask endpoint. Creates a new task when
+# task_id is None; otherwise updates the task - keeping its lastRun/lastError. All form fields
+# are required. Returns the stored task dict, raising ValueError on bad field values.
+def task_upsert(workspace, task_id, name, run_time, days, prompt, model, num_ctx=None, tools=None, enabled=True):
+    tasks = load_tasks(workspace)
+    normalized_name = str(name or '').strip()
+    if not normalized_name:
+        raise ValueError('the task name must not be empty')
+    tool_names = _task_tool_names(tools)
+    task = None
+    if task_id is not None:
+        task = next((task_search for task_search in tasks if task_search.get('id') == task_id), None)
+        if task is None:
+            raise ValueError(f'No task "{task_id}"')
+
+    # Validate the model
+    model_name = str(model or '').strip()
+    if not model_name:
+        raise ValueError('the task model must not be empty')
+
+    num_ctx = _task_num_ctx(num_ctx)
+    if task is not None:
+        task.update({
+            'name': normalized_name,
+            'time': run_time.strftime('%H:%M'),
+            'days': sorted(days),
+            'prompt': str(prompt or ''),
+            'model': model_name,
+            'num_ctx': num_ctx,
+            'tools': tool_names,
+            'enabled': bool(enabled or enabled is None),
+        })
+    else:
+        task = {
+            'id': task_id_new(normalized_name, tasks),
+            'name': normalized_name,
+            'time': run_time.strftime('%H:%M'),
+            'days': sorted(days),
+            'prompt': str(prompt or ''),
+            'model': model_name,
+            'num_ctx': num_ctx,
+            'tools': tool_names,
+            'dest': 'daily',
+            'enabled': bool(enabled or enabled is None),
+            'lastRun': None,
+            'lastError': None
+        }
+        tasks.append(task)
+    save_tasks(workspace, tasks)
+    return task
+
+
+# A task's num_ctx argument, as stored in tasks.json - None, or a positive integer
+def _task_num_ctx(num_ctx):
+    if num_ctx is None or num_ctx == '':
+        return None
+    try:
+        num_ctx = int(num_ctx)
+    except (TypeError, ValueError):
+        raise ValueError(f'invalid num_ctx "{num_ctx}"') from None
+    if num_ctx <= 0:
+        raise ValueError(f'invalid num_ctx "{num_ctx}"')
+    return num_ctx
 
 
 # Remove a task from the workspace's task list by ID
@@ -255,8 +329,13 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
     # The task's allowed tools (read-only tools only) - unused when the model can't tool-call
     request_tools = _task_tool_list(pool_manager, model, task.get('tools') or [])
 
-    # Generate the report using the chat tool-calling loop
-    chat_shim = types.SimpleNamespace(app=types.SimpleNamespace(pool_manager=pool_manager))
+    # Generate the report using the chat tool-calling loop. The chat shim allows send_email
+    # only when the task's tools explicitly include it - otherwise chat.py's send_email flow
+    # rejects the call.
+    chat_shim = types.SimpleNamespace(
+        app=types.SimpleNamespace(pool_manager=pool_manager),
+        allow_email_send='send_email' in (task.get('tools') or [])
+    )
     tool_rounds = 0
     while True:
         round_tools = request_tools if request_tools is None or tool_rounds < _MAX_TOOL_ROUNDS else None
@@ -321,6 +400,24 @@ def log_task_error(workspace, task_id, error, now=None):
         logs_fh.write(f'{now:%H:%M:%S} ERROR task "{task_id}": {error}\n')
 
 
+# A task's run log - the workspace's daily log lines that mention the task, oldest first.
+# Returns the log text, or None when there are no log lines for the task.
+def task_log_text(workspace, task_id, max_lines=50):
+    logs_dir = pathlib.Path(workspace, LOGS_DIRNAME)
+    lines = []
+    if logs_dir.is_dir():
+        for log_path in sorted(logs_dir.glob('*.log'), reverse=True):
+            try:
+                with open(log_path, 'r', encoding='utf-8') as log_fh:
+                    lines.extend(reversed(log_fh.read().splitlines()))
+            except OSError:
+                continue
+    log_lines = [line for line in lines if f'task "{task_id}"' in line]
+    if not log_lines:
+        return None
+    return '\n'.join(reversed(log_lines[-max_lines:]))
+
+
 # The scheduled task manager, running tasks due on their schedule
 class TaskManager():
     __slots__ = ('app', 'started')
@@ -382,6 +479,9 @@ class TaskManager():
 
     # Run a single task if its scheduled time has came (and it hasn't already run for the slot)
     def _tick_task(self, workspace, task, now, memory_limit, catchup):
+        # Disabled tasks never run
+        if not task_enabled(task):
+            return
         slot = task_last_slot(task, now)
         if slot is None:
             return

@@ -23,7 +23,7 @@ from .memory import ( # pylint: disable=unused-import
     MEMORY_LIMIT_DEFAULT, MEMORY_FILENAME, USER_MEMORY_FILENAME,
     find_memory_lines, forget, memory_context, memory_file_path, read_memory_file, remember, workspace_dir
 )
-from .email_tools import EMAIL_CHECK_LIMIT_MAX, EMAIL_TOOLS, check_email
+from .email_tools import EMAIL_CHECK_LIMIT_MAX, EMAIL_TOOLS, check_email, send_email as smtp_send_email
 from .ollama import ollama_chat, ollama_show
 from .web_tools import SEARCH_MAX_RESULTS, WEB_TOOLS, fetch_page, web_search
 
@@ -423,7 +423,12 @@ def _run_tool(chat, tool_name, arguments):
         if not body.strip():
             raise ValueError('missing "body" argument')
         if getattr(chat.app, 'config', None) is None:
-            raise ValueError('send_email is not allowed in scheduled tasks')
+            # Scheduled tasks can send email only when the task's tools explicitly include
+            # send_email - there is no user confirmation step in a task's tool-loop
+            if getattr(chat, 'allow_email_send', False):
+                smtp_send_email(to, subject, body)
+                return f'Email sent to {to}', {'action': 'send', 'value': to}
+            raise ValueError('send_email is not enabled for this task')
         with chat.app.config(save=True) as config:
             conversation = config_conversation(config, chat.conversation_id)
             conversation['exchanges'][-1]['email'] = {'to': to, 'subject': subject, 'body': body}

@@ -43,6 +43,95 @@ struct TaskInfo
     optional string lastError
 
 
+# A scheduled task's full info, for the tasks page
+struct TaskDetails (TaskInfo)
+
+    # The task prompt
+    string prompt
+
+    # The context size (num_ctx), or null for default
+    optional int numCtx
+
+    # The allowed tools
+    string[] tools
+
+    # If true, the task runs on its schedule
+    optional bool enabled
+
+
+# A scheduled task's create/update input. With an "id" member the named task is updated,
+# otherwise a new task is created.
+struct TaskInput
+
+    # The task identifier
+    optional string id
+
+    # The task name
+    string name
+
+    # The daily run time, "HH:MM"
+    string time
+
+    # The run days - ISO weekdays, Monday is 1 and Sunday is 7
+    int[] days
+
+    # The model ID
+    string model
+
+    # The task prompt
+    string prompt
+
+    # The context size (num_ctx), or null for default
+    optional int numCtx
+
+    # The allowed tools
+    string[] tools
+
+    # If true, the task runs on its schedule (the default is true)
+    optional bool enabled
+
+
+# A task's run log
+struct TaskLog
+
+    # The task's log text, or null when there are no log entries
+    optional string log
+
+
+# An email settings summary. The saved app password is never included - only whether one is
+# saved (hasPassword).
+struct EmailSettings
+
+    # The IMAP server host
+    string imapHost
+
+    # The IMAP server port
+    int imapPort
+
+    # The SMTP server host
+    string smtpHost
+
+    # The SMTP server port
+    int smtpPort
+
+    # The mailbox login
+    string user
+
+    # True when an app password is saved in the .env file
+    bool hasPassword
+
+
+# The workspace and email settings
+struct SettingsInfo
+
+    # The workspace directory
+    string workspace
+
+    # The email settings
+    EmailSettings email
+    optional string lastError
+
+
 # The user-model conversation info with generating status
 struct ConversationInfoEx (ConversationInfo)
 
@@ -321,6 +410,131 @@ action setWorkspace
 
     errors
         BadWorkspace
+
+
+# Get the workspace and email settings. The email app password is never included.
+action getSettings
+    urls
+        GET
+
+    output (SettingsInfo)
+
+
+# Set the email settings - the servers, ports and mailbox login are written to the workspace's
+# ".env" file. The app password is write-only: an empty "password" keeps the saved password,
+# and the password is never returned to the browser.
+action setEmailSettings
+    urls
+        POST
+
+    input
+        # The IMAP server host
+        string imapHost
+
+        # The IMAP server port (the default is 993)
+        optional int imapPort
+
+        # The SMTP server host
+        string smtpHost
+
+        # The SMTP server port (the default is 465)
+        optional int smtpPort
+
+        # The mailbox login
+        string user
+
+        # The app password. An empty value keeps the saved password.
+        optional string password
+
+    output
+        # True, once the ".env" file is saved
+        bool saved
+
+    errors
+        BadEmailSettings
+
+
+# Check the email settings - log in to the configured IMAP and SMTP servers
+action testEmailConnection
+    urls
+        POST
+
+    output
+        # A short summary of the checked IMAP and SMTP connections
+        string message
+
+    errors
+        TestFailed
+
+
+# Get the scheduled tasks' full info (the tasks page's list)
+action getTasks
+    urls
+        GET
+
+    output
+        # The tasks
+        TaskDetails[] tasks
+
+
+# Create a scheduled task, or update the task's fields when "id" is present
+action setTask
+    urls
+        POST
+
+    input (TaskInput)
+
+    output
+        # The task identifier
+        string id
+
+    errors
+        BadTask
+
+
+# Delete a scheduled task
+action deleteTask
+    urls
+        POST
+
+    input
+        # The task identifier
+        string id
+
+    errors
+        UnknownTaskID
+
+
+# Run a scheduled task now. The task runs in the background; poll getTasks to see the result.
+action runTask
+    urls
+        POST
+
+    input
+        # The task identifier
+        string id
+
+    output
+        # True, once the task run has started in the background
+        bool started
+
+    errors
+        UnknownTaskID
+
+
+# Get a scheduled task's run log. The log lines come from the workspace's logs directory.
+action getTaskLog
+    urls
+        GET
+
+    query
+        # The task identifier
+        string id
+
+    output (TaskLog)
+
+    errors
+        UnknownTaskID
 
 
 # Set the current model ID

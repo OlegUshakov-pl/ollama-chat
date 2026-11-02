@@ -39,13 +39,17 @@ class TestApp(unittest.TestCase):
                     'deleteConversation',
                     'deleteConversationExchange',
                     'deleteModel',
+                    'deleteTask',
                     'deleteTemplate',
                     'downloadModel',
                     'exportPdf',
                     'getConversation',
                     'getConversations',
                     'getModels',
+                    'getSettings',
                     'getSystemInfo',
+                    'getTaskLog',
+                    'getTasks',
                     'getTemplate',
                     'index.html',
                     'moveConversation',
@@ -57,14 +61,18 @@ class TestApp(unittest.TestCase):
                     'ollamaChatUtil.bare',
                     'regenerateConversationExchange',
                     'replyConversation',
+                    'runTask',
                     'sendEmail',
                     'setConversationTitle',
+                    'setEmailSettings',
                     'setModel',
+                    'setTask',
                     'setWorkspace',
                     'startConversation',
                     'startTemplate',
                     'stopConversation',
                     'stopModelDownload',
+                    'testEmailConnection',
                     'updateTemplate',
                     'vendor/marked.min.js',
                     'vendor/purify.min.js'
@@ -89,13 +97,17 @@ class TestApp(unittest.TestCase):
                     'deleteConversation',
                     'deleteConversationExchange',
                     'deleteModel',
+                    'deleteTask',
                     'deleteTemplate',
                     'downloadModel',
                     'exportPdf',
                     'getConversation',
                     'getConversations',
                     'getModels',
+                    'getSettings',
                     'getSystemInfo',
+                    'getTaskLog',
+                    'getTasks',
                     'getTemplate',
                     'index.html',
                     'moveConversation',
@@ -107,14 +119,18 @@ class TestApp(unittest.TestCase):
                     'ollamaChatUtil.bare',
                     'regenerateConversationExchange',
                     'replyConversation',
+                    'runTask',
                     'sendEmail',
                     'setConversationTitle',
+                    'setEmailSettings',
                     'setModel',
+                    'setTask',
                     'setWorkspace',
                     'startConversation',
                     'startTemplate',
                     'stopConversation',
                     'stopModelDownload',
+                    'testEmailConnection',
                     'updateTemplate',
                     'vendor/marked.min.js',
                     'vendor/purify.min.js',
@@ -438,6 +454,246 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertEqual(response['error'], 'BadWorkspace')
+
+
+    def test_get_settings(self):
+        with unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': 'default-workspace'}):
+            with create_test_files([]) as temp_dir:
+                config_path = os.path.join(temp_dir, 'ollama-chat.json')
+                app = OllamaChat(config_path)
+                status, _headers, content_bytes = app.request('GET', '/getSettings')
+                response = json.loads(content_bytes.decode('utf-8'))
+                self.assertEqual(status, '200 OK')
+                self.assertEqual(response['workspace'], 'default-workspace')
+                self.assertDictEqual( \
+                    response['email'], \
+                    {'imapHost': '', 'imapPort': 993, 'smtpHost': '', 'smtpPort': 465, 'user': '', 'hasPassword': False}
+                )
+
+
+    def test_set_email_settings(self):
+        with create_test_files([]) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            workspace_d = os.path.join(temp_dir, 'ws')
+            app.request('POST', '/setWorkspace', wsgi_input=json.dumps({'path': workspace_d}).encode('utf-8'))
+
+            status, _headers, content_bytes = app.request( \
+                'POST', '/setEmailSettings', \
+                wsgi_input=json.dumps({ \
+                    'imapHost': 'imap.gmail.com', 'imapPort': 993, \
+                    'smtpHost': 'smtp.gmail.com', 'smtpPort': 465, \
+                    'user': 'me@gmail.com', 'password': 'app-password' \
+                }).encode('utf-8') \
+            )
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertDictEqual(response, {'saved': True})
+
+            # The .env file holds the password - the ollama-chat.json config never does
+            with open(os.path.join(workspace_d, '.env'), 'r', encoding='utf-8') as env_fh:
+                env_content = env_fh.read()
+            self.assertIn('EMAIL_PASSWORD=app-password', env_content)
+            with open(config_path, 'r', encoding='utf-8') as config_fh:
+                self.assertNotIn('app-password', config_fh.read())
+
+            # A settings read never includes the password - just hasPassword
+            status, _headers, content_bytes = app.request('GET', '/getSettings')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(response['email']['hasPassword'], True)
+            self.assertNotIn('app-password', json.dumps(response))
+            self.assertEqual(response['email']['user'], 'me@gmail.com')
+
+            # An empty password keeps the saved password
+            app.request( \
+                'POST', '/setEmailSettings', \
+                wsgi_input=json.dumps({ \
+                    'imapHost': 'imap.gmail.com', 'imapPort': 993, \
+                    'smtpHost': 'smtp.gmail.com', 'smtpPort': 465, 'user': 'me@gmail.com' \
+                }).encode('utf-8') \
+            )
+            with open(os.path.join(workspace_d, '.env'), 'r', encoding='utf-8') as env_fh:
+                self.assertIn('EMAIL_PASSWORD=app-password', env_fh.read())
+
+
+    def test_test_email_connection(self):
+        with create_test_files([]) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            with unittest.mock.patch('ollama_chat.app.test_email_connection', return_value='IMAP: logged in to imap.example.com:993'):
+                status, _headers, content_bytes = app.request('POST', '/testEmailConnection')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertDictEqual(response, {'message': 'IMAP: logged in to imap.example.com:993'})
+
+            with unittest.mock.patch( \
+                'ollama_chat.app.test_email_connection', \
+                side_effect=ValueError('IMAP: cannot connect to the IMAP server "imap.example.com:993"') \
+            ):
+                status, _headers, content_bytes = app.request('POST', '/testEmailConnection')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            self.assertEqual(response['error'], 'TestFailed')
+
+
+    def test_set_task(self):
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            request = {
+                'name': 'Morning briefing',
+                'time': '9:00',
+                'days': [1, 2, 3, 4, 5],
+                'model': 'llama3.2',
+                'prompt': 'Make a report',
+                'tools': ['web_search', 'fetch_page']
+            }
+
+            # Creating a task starts the scheduler thread
+            with unittest.mock.patch('threading.Thread') as mock_thread:
+                status, _headers, content_bytes = app.request( \
+                    'POST', '/setTask', wsgi_input=json.dumps(request).encode('utf-8') \
+                )
+            mock_thread.assert_called_once()  # the scheduler thread starts lazily
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertEqual(response, {'id': 'morning-briefing'})
+            with open(os.path.join(temp_dir, 'tasks.json'), 'r', encoding='utf-8') as tasks_fh:
+                task = json.load(tasks_fh)[0]
+            self.assertEqual(task['time'], '09:00')
+            self.assertListEqual(task['tools'], ['web_search', 'fetch_page'])
+            self.assertTrue(task.get('enabled', True))
+
+            # Update the task
+            request['id'] = 'morning-briefing'
+            request['enabled'] = False
+            status, _headers, content_bytes = app.request( \
+                'POST', '/setTask', wsgi_input=json.dumps(request).encode('utf-8') \
+            )
+            self.assertEqual(status, '200 OK')
+            with open(os.path.join(temp_dir, 'tasks.json'), 'r', encoding='utf-8') as tasks_fh:
+                self.assertFalse(json.load(tasks_fh)[0]['enabled'])
+
+
+    def test_set_task_errors(self):
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            bad_requests = [
+                {'name': 'Bad time', 'time': '25:00', 'days': [1], 'model': 'llm', 'prompt': 'p', 'tools': []},
+                {'name': 'Bad days', 'time': '09:00', 'days': [8], 'model': 'llm', 'prompt': 'p', 'tools': []},
+                {'name': 'Unknown task', 'id': 'nope', 'time': '09:00', 'days': [1], 'model': 'llm', 'prompt': 'p', 'tools': []}
+            ]
+            for request in bad_requests:
+                status, _headers, content_bytes = app.request( \
+                    'POST', '/setTask', wsgi_input=json.dumps(request).encode('utf-8') \
+                )
+                response = json.loads(content_bytes.decode('utf-8'))
+                self.assertEqual(status, '400 Bad Request')
+                self.assertEqual(response['error'], 'BadTask')
+
+
+    def test_get_tasks_and_delete_task(self):
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            app.request( \
+                'POST', '/setTask', \
+                wsgi_input=json.dumps({ \
+                    'name': 'T', 'time': '09:00', 'days': [1], 'model': 'llm', 'prompt': 'p', \
+                    'numCtx': 4096, 'tools': ['web_search'] \
+                }).encode('utf-8') \
+            )
+
+            status, _headers, content_bytes = app.request('GET', '/getTasks')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertListEqual( \
+                response['tasks'], \
+                [{
+                    'id': 't', 'name': 'T', 'time': '09:00', 'days': [1], 'model': 'llm',
+                    'prompt': 'p', 'numCtx': 4096, 'tools': ['web_search'], 'enabled': True
+                }]
+            )
+
+            status, _headers, content_bytes = app.request( \
+                'POST', '/deleteTask', wsgi_input=json.dumps({'id': 't'}).encode('utf-8') \
+            )
+            self.assertEqual(status, '200 OK')
+            status, _headers, content_bytes = app.request( \
+                'POST', '/deleteTask', wsgi_input=json.dumps({'id': 't'}).encode('utf-8') \
+            )
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            self.assertEqual(response['error'], 'UnknownTaskID')
+
+
+    def test_run_task(self):
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            from ollama_chat.tasks import save_tasks  # pylint: disable=import-outside-toplevel
+            save_tasks(temp_dir, [{
+                'id': 't', 'name': 'T', 'time': '09:00', 'days': [1], 'prompt': 'p', 'model': 'llm',
+                'num_ctx': None, 'tools': [], 'dest': 'daily', 'lastRun': None, 'lastError': None
+            }])
+
+            with unittest.mock.patch('threading.Thread') as mock_thread:
+                status, _headers, content_bytes = app.request( \
+                    'POST', '/runTask', wsgi_input=json.dumps({'id': 't'}).encode('utf-8') \
+                )
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertDictEqual(response, {'started': True})
+            mock_thread.assert_called_once()
+            # The background thread target is the task manager's run_task_by_id
+            target = mock_thread.call_args.kwargs['target']
+            self.assertEqual(target.__name__, 'run_task_by_id')
+            self.assertEqual(target.__self__ is app.tasks, True)
+
+            status, _headers, content_bytes = app.request( \
+                'POST', '/runTask', wsgi_input=json.dumps({'id': 'nope'}).encode('utf-8') \
+            )
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            self.assertEqual(response['error'], 'UnknownTaskID')
+
+
+    def test_get_task_log(self):
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            from ollama_chat.tasks import save_tasks  # pylint: disable=import-outside-toplevel
+            save_tasks(temp_dir, [{
+                'id': 't', 'name': 'T', 'time': '09:00', 'days': [1], 'prompt': 'p', 'model': 'llm',
+                'num_ctx': None, 'tools': [], 'dest': 'daily', 'lastRun': None, 'lastError': None
+            }])
+
+            # No log entries -> an empty response
+            status, _headers, content_bytes = app.request('GET', '/getTaskLog', \
+                query_string=encode_query_string({'id': 't'}))
+            self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {})
+
+            os.mkdir(os.path.join(temp_dir, 'logs'))
+            with open(os.path.join(temp_dir, 'logs', '2026-02-03.log'), 'w', encoding='utf-8') as log_fh:
+                log_fh.write('09:00 ERROR task "t": boom\n')
+
+            status, _headers, content_bytes = app.request('GET', '/getTaskLog', \
+                query_string=encode_query_string({'id': 't'}))
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(response['log'], '09:00 ERROR task "t": boom')
+
+            status, _headers, content_bytes = app.request('GET', '/getTaskLog', \
+                query_string=encode_query_string({'id': 'nope'}))
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            self.assertEqual(response['error'], 'UnknownTaskID')
 
 
     def test_set_model(self):

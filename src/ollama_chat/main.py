@@ -148,10 +148,11 @@ def main(argv=None):
                 return start_response(status, response_headers)
             return application(environ, log_start_response)
 
-        # Start the backend application
+        # Start the backend application. Listen only on the loopback interface - the app is a
+        # single-user, local application and its pages hold settings and secrets.
         if not args.quiet:
             print(f'ollama-chat: Serving at {url} ...')
-        waitress.serve(application_wrap, port=args.port)
+        waitress.serve(application_wrap, host='127.0.0.1', port=args.port)
 
     # Not starting a backend service, so we must wait on the web browser start
     elif args.browser:

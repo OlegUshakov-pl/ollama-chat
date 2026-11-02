@@ -10,7 +10,7 @@ import unittest.mock
 
 from ollama_chat.memory import ensure_workspace
 from ollama_chat.tasks import (
-    TASK_TOOLS, _run_task,
+    _run_task, task_log_text, task_upsert,
     load_tasks, log_task_error, parse_task_days, parse_task_time, run_stored_task, run_task_once,
     save_tasks, task_add, task_days_text, task_id_new, task_last_slot, task_remove, tasks_summary,
     tasks_path, write_task_result, TaskManager
@@ -170,8 +170,9 @@ class TestTaskAddRemove(unittest.TestCase):
                     'prompt': 'prompt text',
                     'model': 'llm',
                     'num_ctx': None,
-                    'tools': list(TASK_TOOLS),
+                    'tools': ['web_search', 'fetch_page', 'check_email'],
                     'dest': 'daily',
+                    'enabled': True,
                     'lastRun': None,
                     'lastError': None
                 }]
@@ -193,16 +194,18 @@ class TestTaskAddRemove(unittest.TestCase):
             self.assertEqual(tasks[0]['num_ctx'], 8192)
             self.assertListEqual(tasks[0]['tools'], ['web_search'])
 
-            # Email reading is allowed in tasks, sending is not
+            # Email sending is an opt-in tool, off by default
             task_add(temp_dir, 'T2', parse_task_time('09:00'), parse_task_days('all'), 'p', 'llm', tools='check_email')
             self.assertListEqual(load_tasks(temp_dir)[1]['tools'], ['check_email'])
+            task_add(temp_dir, 'T3', parse_task_time('09:00'), parse_task_days('all'), 'p', 'llm', tools='send_email')
+            self.assertListEqual(load_tasks(temp_dir)[2]['tools'], ['send_email'])
 
 
     def test_task_add_unknown_tool(self):
         with create_test_files([]) as temp_dir:
             with self.assertRaises(ValueError) as caught:
-                task_add(temp_dir, 'T', parse_task_time('09:00'), parse_task_days('all'), 'p', 'llm', tools='send_email')
-            self.assertIn('send_email', str(caught.exception))
+                task_add(temp_dir, 'T', parse_task_time('09:00'), parse_task_days('all'), 'p', 'llm', tools='write_file')
+            self.assertIn('write_file', str(caught.exception))
             self.assertEqual(load_tasks(temp_dir), [])
 
 
@@ -388,6 +391,106 @@ class TestRunTask(unittest.TestCase):
                 report = _run_task(unittest.mock.sentinel.pool, temp_dir, task)
             self.assertEqual(report, 'The report.')
             self.assertNotIn('email', os.listdir(temp_dir))
+
+
+    def test_run_task_send_email_opt_in(self):
+        # A task may send email when its tools list explicitly includes send_email
+        with create_test_files([]) as temp_dir:
+            ensure_workspace(temp_dir)
+            task = dict(TEST_TASK, tools=['send_email'])
+            tool_call = {
+                'function': {'name': 'send_email', 'arguments': {'to': 'x@y.z', 'subject': 's', 'body': 'b'}}
+            }
+            rounds = [
+                [{'message': {'content': 'sending', 'tool_calls': [tool_call]}}],
+                [{'message': {'content': 'The report.'}}]
+            ]
+            with mock_ollama(rounds, capabilities=['tools']):
+                with unittest.mock.patch('ollama_chat.chat.smtp_send_email') as mock_smtp_send:
+                    report = _run_task(unittest.mock.sentinel.pool, temp_dir, task)
+            self.assertEqual(report, 'The report.')
+            mock_smtp_send.assert_called_once_with('x@y.z', 's', 'b')
+
+
+    def test_tick_disabled_task(self):
+        with create_test_files([]) as temp_dir:
+            save_tasks(temp_dir, [dict(TEST_TASK, enabled=False)])
+            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            task_manager = make_task_manager(app)
+            now = datetime.datetime(2026, 2, 3, 9, 10)
+            with unittest.mock.patch('ollama_chat.tasks.run_stored_task') as mock_run:
+                task_manager.tick(now=now)
+            mock_run.assert_not_called()
+
+
+class TestTaskUpsertAndLog(unittest.TestCase):
+
+    def test_task_upsert_create(self):
+        with create_test_files([]) as temp_dir:
+            task = task_upsert( \
+                temp_dir, None, 'Briefing', parse_task_time('9:15'), [1, 2], 'Make a report', 'llm', \
+                num_ctx='4096', tools='web_search, send_email', enabled=True \
+            )
+            self.assertEqual(task['id'], 'briefing')
+            self.assertEqual(task['time'], '09:15')
+            self.assertListEqual(task['days'], [1, 2])
+            self.assertEqual(task['num_ctx'], 4096)
+            self.assertListEqual(task['tools'], ['web_search', 'send_email'])
+            self.assertTrue(task['enabled'])
+            self.assertIsNone(task['lastRun'])
+            saved = load_tasks(temp_dir)[0]
+            self.assertEqual(saved['id'], 'briefing')
+
+
+    def test_task_upsert_update_keeps_last_run(self):
+        with create_test_files([]) as temp_dir:
+            save_tasks(temp_dir, [dict(TEST_TASK, lastRun='2026-02-03 09:00', lastError=None, enabled=True)])
+            task = task_upsert( \
+                temp_dir, 'briefing', 'New name', parse_task_time('10:30'), [6, 7], 'New prompt', 'llm2', \
+                num_ctx=None, tools='', enabled=False \
+            )
+            self.assertEqual(task['name'], 'New name')
+            self.assertEqual(task['time'], '10:30')
+            self.assertListEqual(task['days'], [6, 7])
+            self.assertListEqual(task['tools'], ['web_search', 'fetch_page', 'check_email'])
+            self.assertFalse(task['enabled'])
+            self.assertEqual(task['lastRun'], '2026-02-03 09:00')  # lastRun is kept on update
+            self.assertEqual(task['model'], 'llm2')
+            self.assertEqual(load_tasks(temp_dir)[0]['name'], 'New name')
+
+
+    def test_task_upsert_unknown_id(self):
+        with create_test_files([]) as temp_dir:
+            with self.assertRaises(ValueError):
+                task_upsert(temp_dir, 'nope', 'N', parse_task_time('09:00'), [1], 'p', 'llm')
+
+
+    def test_task_upsert_bad_fields(self):
+        with create_test_files([]) as temp_dir:
+            with self.assertRaises(ValueError):
+                task_upsert(temp_dir, None, '   ', parse_task_time('09:00'), [1], 'p', 'llm')
+            with self.assertRaises(ValueError):
+                task_upsert(temp_dir, None, 'N', parse_task_time('09:00'), [1], 'p', '')
+            with self.assertRaises(ValueError):
+                task_upsert(temp_dir, None, 'N', parse_task_time('09:00'), [1], 'p', 'llm', num_ctx='bad')
+            with self.assertRaises(ValueError):
+                task_upsert(temp_dir, None, 'N', parse_task_time('09:00'), [1], 'p', 'llm', num_ctx=-5)
+            with self.assertRaises(ValueError):
+                task_upsert(temp_dir, None, 'N', parse_task_time('09:00'), [1], 'p', 'llm', tools='unknown_tool')
+
+
+    def test_task_log_text(self):
+        with create_test_files([
+            ('logs/2026-02-02.log', '09:00 ERROR task "a": boom\n09:05 INFO task "b": fine\n'),
+            ('logs/2026-02-03.log', '10:00 ERROR task "a": again\n')
+        ]) as temp_dir:
+            self.assertEqual( \
+                task_log_text(temp_dir, 'a'), \
+                '09:00 ERROR task "a": boom\n10:00 ERROR task "a": again' \
+            )
+            self.assertIsNone(task_log_text(temp_dir, 'missing'))
+        with create_test_files([]) as temp_dir:
+            self.assertIsNone(task_log_text(temp_dir, 'a'))
 
 
 class TestTaskManager(unittest.TestCase):
