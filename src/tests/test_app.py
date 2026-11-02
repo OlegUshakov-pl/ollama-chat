@@ -46,6 +46,7 @@ class TestApp(unittest.TestCase):
                     'getConversation',
                     'getConversations',
                     'getModels',
+                    'getProfile',
                     'getSettings',
                     'getSystemInfo',
                     'getTaskLog',
@@ -66,6 +67,7 @@ class TestApp(unittest.TestCase):
                     'setConversationTitle',
                     'setEmailSettings',
                     'setModel',
+                    'setProfile',
                     'setTask',
                     'setWorkspace',
                     'startConversation',
@@ -104,6 +106,7 @@ class TestApp(unittest.TestCase):
                     'getConversation',
                     'getConversations',
                     'getModels',
+                    'getProfile',
                     'getSettings',
                     'getSystemInfo',
                     'getTaskLog',
@@ -124,6 +127,7 @@ class TestApp(unittest.TestCase):
                     'setConversationTitle',
                     'setEmailSettings',
                     'setModel',
+                    'setProfile',
                     'setTask',
                     'setWorkspace',
                     'startConversation',
@@ -469,6 +473,72 @@ class TestAPI(unittest.TestCase):
                     response['email'], \
                     {'imapHost': '', 'imapPort': 993, 'smtpHost': '', 'smtpPort': 465, 'user': '', 'hasPassword': False}
                 )
+
+
+    def test_get_profile(self):
+        with unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': 'default-workspace'}):
+            with create_test_files([]) as temp_dir:
+                config_path = os.path.join(temp_dir, 'ollama-chat.json')
+                app = OllamaChat(config_path)
+                app.request('POST', '/setWorkspace', wsgi_input=json.dumps({'path': 'default-workspace'}).encode('utf-8'))
+                status, _headers, content_bytes = app.request('GET', '/getProfile')
+                response = json.loads(content_bytes.decode('utf-8'))
+                self.assertEqual(status, '200 OK')
+                self.assertEqual(response['limit'], 1500)
+                self.assertTrue(response['content'].startswith('# About the user'))
+
+
+    def test_set_profile(self):
+        with create_test_files([]) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            workspace_d = os.path.join(temp_dir, 'ws')
+            app.request('POST', '/setWorkspace', wsgi_input=json.dumps({'path': workspace_d}).encode('utf-8'))
+
+            # A profile save goes to memory/USER.md in the workspace - never into the config
+            profile_content = '# About the user\n\n- Name: Oleg\n'
+            status, _headers, content_bytes = app.request( \
+                'POST', '/setProfile', wsgi_input=json.dumps({'content': profile_content}).encode('utf-8') \
+            )
+            self.assertEqual(status, '200 OK')
+            self.assertEqual(json.loads(content_bytes.decode('utf-8')), {'saved': True})
+            with open(os.path.join(workspace_d, 'memory', 'USER.md'), 'r', encoding='utf-8') as profile_fh:
+                self.assertEqual(profile_fh.read(), profile_content)
+
+            # A profile read gets the saved content
+            status, _headers, content_bytes = app.request('GET', '/getProfile')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(response['content'], profile_content)
+
+            # Content over the (default) limit is rejected
+            status, _headers, content_bytes = app.request( \
+                'POST', '/setProfile', wsgi_input=json.dumps({'content': 'x' * 1501}).encode('utf-8') \
+            )
+            self.assertEqual(json.loads(content_bytes.decode('utf-8'))['error'], 'ProfileTooLong')
+            with open(os.path.join(workspace_d, 'memory', 'USER.md'), 'r', encoding='utf-8') as profile_fh:
+                self.assertEqual(profile_fh.read(), profile_content)
+
+
+    def test_set_profile_limit(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({'conversations': [], 'profileLimit': 100}))
+        ]
+        with create_test_files(test_files) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            workspace_d = os.path.join(temp_dir, 'ws')
+            app.request('POST', '/setWorkspace', wsgi_input=json.dumps({'path': workspace_d}).encode('utf-8'))
+
+            # The profileLimit from the config is used
+            _status, _headers, content_bytes = app.request('GET', '/getProfile')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(response['limit'], 100)
+
+            # Content over the limit is rejected
+            status, _headers, content_bytes = app.request( \
+                'POST', '/setProfile', wsgi_input=json.dumps({'content': 'x' * 101}).encode('utf-8') \
+            )
+            self.assertEqual(json.loads(content_bytes.decode('utf-8'))['error'], 'ProfileTooLong')
 
 
     def test_set_email_settings(self):

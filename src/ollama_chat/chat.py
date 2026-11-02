@@ -21,7 +21,8 @@ import urllib3
 
 from .memory import ( # pylint: disable=unused-import
     MEMORY_LIMIT_DEFAULT, MEMORY_FILENAME, USER_MEMORY_FILENAME,
-    find_memory_lines, forget, memory_context, memory_file_path, read_memory_file, remember, workspace_dir
+    find_memory_lines, forget, memory_context, memory_file_path, read_memory_file, remember,
+    time_context, workspace_dir
 )
 from .email_tools import EMAIL_CHECK_LIMIT_MAX, EMAIL_TOOLS, check_email, send_email as smtp_send_email
 from .ollama import ollama_chat, ollama_show
@@ -233,6 +234,12 @@ class ChatManager():
                     )
                     if memory_text:
                         messages.insert(0, {'role': 'system', 'content': memory_text})
+
+                    # Inject the current date and time zone (the user's zone from USER.md, or
+                    # local time), so model answers can account for "today"
+                    time_text = time_context(workspace_dir(config))
+                    if time_text:
+                        messages.insert(0, {'role': 'system', 'content': time_text})
 
                 # Stream the chat response, executing the model's tool calls until it answers
                 tool_rounds = 0

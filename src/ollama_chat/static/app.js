@@ -79,6 +79,28 @@ const STRINGS = {
     mdClose: 'Close preview',
     navSettings: 'Settings',
     navTasks: 'Tasks',
+    navProfile: 'Profile',
+    profileHeading: 'Profile',
+    profileHint: 'Saved to memory/USER.md in the workspace and added to the system prompt of every message. Use "Text" to edit the file as markdown.',
+    profileModeForm: 'Form',
+    profileModeText: 'Text',
+    profileWarning: 'Do not enter passwords, secret keys, your exact home address or document numbers. USER.md is sent to the model with every message.',
+    profileName: 'Name',
+    profileProfession: 'Profession',
+    profileCountry: 'Country',
+    profileCity: 'City (optional)',
+    profileTimezone: 'Time zone',
+    profileTimezoneHint: 'IANA name, e.g. Europe/Warsaw - the current date and local time are added to prompts.',
+    profileLanguages: 'Languages',
+    profileReplyLanguage: 'Reply language',
+    profileInterests: 'Interests',
+    profileEquipment: 'Equipment',
+    profileNotInterested: 'Not interested in',
+    profileReplyStyle: 'Reply style',
+    profileOther: 'Other',
+    profileChars: 'characters',
+    profileLimitReached: 'The profile is over the character limit - shorten it before saving.',
+    profileSaved: 'Profile saved to memory/USER.md',
     settingsHeading: 'Settings',
     settingsWorkspace: 'Workspace',
     workspaceLabel: 'Workspace folder',
@@ -162,6 +184,7 @@ const ICONS = {
     upload: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
     clip: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57a4 4 0 1 1 5.66 5.66l-8.58 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
     md: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg>',
+    user: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M5 21c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg>',
     gear: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
     checklist: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h12"/><path d="M9 12h12"/><path d="M9 18h12"/><path d="m3 6 1 1 2-2"/><path d="m3 12 1 1 2-2"/><path d="m3 18 1 1 2-2"/></svg>',
     play: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 9-14 9Z"/></svg>',
@@ -177,6 +200,23 @@ const TASKS_POLL_MS = 4000;
 
 /** The task tools thetasks form offers, in order (send_email is opt-in: unchecked). */
 const TASK_FORM_TOOLS = ['web_search', 'fetch_page', 'check_email', 'send_email'];
+
+/** The user profile form fields - the field id, the USER.md bullet key and which section of
+ * USER.md the field belongs to (values are written as "- <key>: <value>" bullets). */
+const PROFILE_FIELDS = [
+    { id: 'name', key: 'Name', str: 'profileName', section: 'user' },
+    { id: 'profession', key: 'Profession', str: 'profileProfession', section: 'user' },
+    { id: 'country', key: 'Country', str: 'profileCountry', section: 'user' },
+    { id: 'city', key: 'City', str: 'profileCity', section: 'user' },
+    { id: 'timezone', key: 'Timezone', str: 'profileTimezone', section: 'user' },
+    { id: 'languages', key: 'Languages', str: 'profileLanguages', section: 'user' },
+    { id: 'interests', key: 'Interests', str: 'profileInterests', section: 'user' },
+    { id: 'equipment', key: 'Equipment', str: 'profileEquipment', section: 'user' },
+    { id: 'replyLanguage', key: 'Reply language', str: 'profileReplyLanguage', section: 'prefs' },
+    { id: 'notInterested', key: 'Not interested in', str: 'profileNotInterested', section: 'prefs' },
+    { id: 'replyStyle', key: 'Reply style', str: 'profileReplyStyle', section: 'prefs' },
+    { id: 'other', key: 'Other', str: 'profileOther', section: 'prefs' }
+];
 
 /** Maximum number of files that can be attached to a single message. */
 const MAX_ATTACH_FILES = 10;
@@ -219,6 +259,7 @@ const state = {
     mdViewer: null,
     workspace: null,
     settings: { loading: false, error: null, data: null, saving: false, test: null, notice: null, savingEmail: false },
+    profile: { loading: false, error: null, data: null, saving: false, notice: null, values: {}, mode: 'form' },
     tasksPage: { loading: false, error: null, items: null, timer: null },
     taskForm: null,
     taskLog: null,
@@ -335,6 +376,9 @@ function parseRoute() {
     }
     if (hash === '#/tasks') {
         return { name: 'tasks' };
+    }
+    if (hash === '#/profile') {
+        return { name: 'profile' };
     }
     const match = hash.match(/^#\/c\/([A-Za-z0-9-]+)/);
     if (match) {
@@ -582,6 +626,198 @@ async function testConnection() {
         state.settings.test = { running: false, ok: false, message: err.message };
     }
     render();
+}
+
+/* ---------- Profile page ---------- */
+
+/** Load the profile page data - the USER.md content and its character limit. */
+async function loadProfile() {
+    state.profile = { ...state.profile, loading: true, error: null, notice: null };
+    render();
+    try {
+        const data = await apiGet('getProfile');
+        state.profile = {
+            ...state.profile,
+            loading: false,
+            data: { content: data.content, limit: data.limit },
+            values: parseProfileContent(data.content),
+            mode: 'form',
+            error: null
+        };
+    } catch (err) {
+        state.profile = { ...state.profile, loading: false, error: err.message };
+    }
+    render();
+}
+
+/** Parse the USER.md markdown into the profile form values. Known "- <key>: <value>" bullets
+ * are matched case-insensitively; multi-line values use indented continuation lines; unknown
+ * bullets are kept in the "Other" field so nothing is lost. */
+function parseProfileContent(content) {
+    const values = {};
+    PROFILE_FIELDS.forEach((field) => { values[field.id] = ''; });
+    const fieldByKey = new Map(PROFILE_FIELDS.map((field) => [field.key.toLowerCase(), field]));
+    let current = null;
+    for (const line of content.split('\n')) {
+        if (!line.trim()) {
+            current = null;
+            continue;
+        }
+        if (/^#{1,6} /.test(line)) {
+            current = null;
+            continue;
+        }
+        const bullet = line.match(/^- (.*)$/);
+        if (bullet) {
+            const kvMatch = bullet[1].match(/^(.{1,40}?):\s*(.*)$/);
+            const field = kvMatch ? fieldByKey.get(kvMatch[1].trim().toLowerCase()) : null;
+            if (field) {
+                current = field;
+                values[field.id] = kvMatch[2].trim();
+                continue;
+            }
+            current = null;
+            values.other = appendProfileLine(values.other, bullet[1].trim());
+            continue;
+        }
+        if (current) {
+            values[current.id] = appendProfileLine(values[current.id], line.trim());
+        }
+    }
+    return values;
+}
+
+/** Append a value line to a profile field's (possibly multi-line) value. */
+function appendProfileLine(value, line) {
+    return value ? `${value}\n${line}` : line;
+}
+
+/** The current profile form field values, read from the form's inputs. */
+function profileFormValues() {
+    const values = {};
+    PROFILE_FIELDS.forEach((field) => {
+        const input = document.getElementById(`profile-f-${field.id}`);
+        values[field.id] = input ? input.value : (state.profile.values[field.id] || '');
+    });
+    return values;
+}
+
+/** The USER.md markdown content for the profile form values - the "About the user" and
+ * "Preferences" sections, "- <key>: <value>" bullets (continuation lines are re-indented). */
+function serializeProfileFields(values) {
+    const userLines = [];
+    const prefLines = [];
+    PROFILE_FIELDS.forEach((field) => {
+        const value = String(values[field.id] || '').trim();
+        if (!value) {
+            return;
+        }
+        const target = field.section === 'user' ? userLines : prefLines;
+        value.split('\n').forEach((part, ix) => {
+            part = part.trim();
+            if (part) {
+                target.push(ix === 0 ? `- ${field.key}: ${part}` : `  ${part}`);
+            }
+        });
+    });
+    const lines = ['# About the user', ''];
+    lines.push(...userLines);
+    if (prefLines.length) {
+        lines.push('', '# Preferences', '');
+        lines.push(...prefLines);
+    }
+    return lines.join('\n');
+}
+
+/** Switch the profile page between the form mode and the raw USER.md text mode, carrying the
+ * current content across the switch. */
+function setProfileMode(mode) {
+    const form = state.profile;
+    if (!form.data || form.mode === mode) {
+        return;
+    }
+    let content;
+    if (mode === 'form') {
+        const textarea = document.getElementById('profile-text');
+        content = textarea ? textarea.value : form.data.content;
+        form.values = parseProfileContent(content);
+    } else {
+        content = serializeProfileFields(profileFormValues());
+    }
+    form.data.content = content;
+    form.mode = mode;
+    form.error = null;
+    form.notice = null;
+    render();
+}
+
+/** Save the profile page content - the serialized form or the raw text. */
+async function submitProfile() {
+    const form = state.profile;
+    if (!form.data || form.saving) {
+        return;
+    }
+    let content;
+    if (form.mode === 'text') {
+        const textarea = document.getElementById('profile-text');
+        content = textarea ? textarea.value : form.data.content;
+    } else {
+        content = serializeProfileFields(profileFormValues());
+    }
+    if (content.length > form.data.limit) {
+        form.error = STRINGS.profileLimitReached;
+        render();
+        return;
+    }
+    form.saving = true;
+    form.error = null;
+    form.notice = null;
+    render();
+    try {
+        await apiPost('setProfile', { content });
+        form.saving = false;
+        form.data.content = content;
+        if (form.mode === 'form') {
+            form.values = parseProfileContent(content);
+        }
+        form.notice = STRINGS.profileSaved;
+    } catch (err) {
+        form.saving = false;
+        form.error = err.message;
+    }
+    render();
+}
+
+/** The current profile content's character count - the form serialization in form mode or the
+ * text area's value in text mode. */
+function profileContentLength() {
+    const form = state.profile;
+    if (!form.data) {
+        return 0;
+    }
+    if (form.mode === 'text') {
+        const textarea = document.getElementById('profile-text');
+        return textarea ? textarea.value.length : form.data.content.length;
+    }
+    return serializeProfileFields(profileFormValues()).length;
+}
+
+/** Update the character counter and the save button in place (no re-render, keeps focus). */
+function updateProfileCounter() {
+    const form = state.profile;
+    if (!form.data) {
+        return;
+    }
+    const over = profileContentLength() > form.data.limit;
+    const counter = document.getElementById('profile-counter');
+    if (counter) {
+        counter.textContent = `${profileContentLength()} / ${form.data.limit} ${STRINGS.profileChars}`;
+        counter.classList.toggle('limit-over', over);
+    }
+    const button = document.getElementById('profile-save');
+    if (button) {
+        button.disabled = over;
+    }
 }
 
 /* ---------- Tasks page ---------- */
@@ -1237,6 +1473,81 @@ function buildSettingsHtml() {
     return buildPageHtml(STRINGS.settingsHeading, banners + workspaceHtml + gmailHtml);
 }
 
+/** A profile form field's HTML (single-line inputs; "Other" is a multi-line text area). */
+function buildProfileFieldHtml(field, value) {
+    const common = ` id="profile-f-${escapeHtml(field.id)}" spellcheck="false"`;
+    const input = field.id === 'other'
+        ? `<textarea${common} rows="4">${escapeHtml(value)}</textarea>`
+        : `<input${common} type="text" value="${escapeHtml(String(value || ''))}">`;
+    let hint = '';
+    if (field.id === 'timezone') {
+        hint = `<span class="form-hint">${escapeHtml(STRINGS.profileTimezoneHint)}</span>`;
+    }
+    return `<label class="form-field" for="profile-f-${escapeHtml(field.id)}">` +
+        `<span>${escapeHtml(STRINGS[field.str])}</span>${input}${hint}</label>`;
+}
+
+function buildProfileHtml() {
+    const form = state.profile;
+    if (form.loading || (!form.data && !form.error)) {
+        return buildPageHtml(STRINGS.profileHeading, `<p class="page-status">${escapeHtml(STRINGS.loading)}</p>`);
+    }
+    if (form.error && !form.data) {
+        return buildPageHtml(STRINGS.profileHeading,
+            `<div class="error-banner" role="alert">${escapeHtml(`${STRINGS.errorBannerPrefix}${form.error}`)}</div>` +
+            `<p class="page-status"><button type="button" class="btn" data-action="reloadProfile">${escapeHtml(STRINGS.retry)}</button></p>`);
+    }
+    const data = form.data;
+    const values = form.mode === 'form'
+        ? profileFormValues()
+        : form.values;
+    const userFields = PROFILE_FIELDS.filter((field) => field.section === 'user')
+        .map((field) => buildProfileFieldHtml(field, values[field.id])).join('');
+    const prefFields = PROFILE_FIELDS.filter((field) => field.section === 'prefs')
+        .map((field) => buildProfileFieldHtml(field, values[field.id])).join('');
+    const length = profileContentLength();
+    const over = length > data.limit;
+    const modeButton = (mode, labelKey) =>
+        `<button type="button" class="btn${form.mode === mode ? ' btn-primary' : ''}" data-action="profile-mode" data-id="${escapeHtml(mode)}">` +
+        `${escapeHtml(STRINGS[labelKey])}</button>`;
+    let banners = '';
+    if (form.error) {
+        banners += `<div class="error-banner" role="alert">${escapeHtml(`${STRINGS.errorBannerPrefix}${form.error}`)}</div>`;
+    }
+    if (form.notice) {
+        banners += `<div class="notice-banner" role="status">${escapeHtml(form.notice)}</div>`;
+    }
+    if (over) {
+        banners += `<div class="error-banner" role="alert">${escapeHtml(STRINGS.profileLimitReached)}</div>`;
+    }
+    const formHtml = form.mode === 'form'
+        ? (
+            `<section class="panel">` +
+            `<div class="form-grid">${userFields}</div>` +
+            `</section>` +
+            `<section class="panel">` +
+            `<div class="form-grid">${prefFields}</div>` +
+            `</section>`)
+        : (
+            `<section class="panel">` +
+            `<label class="form-field form-row-wide" for="profile-text"><span>${escapeHtml(STRINGS.profileHint)}</span>` +
+            `<textarea id="profile-text" rows="18" spellcheck="false">${escapeHtml(data.content)}</textarea></label>` +
+            `</section>`);
+    return buildPageHtml(STRINGS.profileHeading,
+        banners +
+        `<div class="panel-actions">` +
+        modeButton('form', 'profileModeForm') +
+        modeButton('text', 'profileModeText') +
+        `<span id="profile-counter">` +
+        `${escapeHtml(`${length} / ${data.limit} ${STRINGS.profileChars}`)}</span>` +
+        `<button type="button" class="btn btn-primary" id="profile-save" data-action="saveProfile"${over || form.saving ? ' disabled' : ''}>` +
+        `${escapeHtml(STRINGS.save)}</button>` +
+        `</div>` +
+        `<p class="form-hint">${escapeHtml(STRINGS.profileHint)}</p>` +
+        formHtml +
+        `<p class="form-hint profile-warning">${escapeHtml(STRINGS.profileWarning)}</p>`);
+}
+
 function buildTasksListHtml() {
     const page = state.tasksPage;
     if (page.loading) {
@@ -1563,6 +1874,7 @@ function render() {
     const theme = currentTheme();
     const pageName = state.route.name === 'settings' ? STRINGS.settingsHeading
         : state.route.name === 'tasks' ? STRINGS.tasksHeading
+        : state.route.name === 'profile' ? STRINGS.profileHeading
         : state.route.name === 'chat' ? chatTitle(state.route.id)
         : STRINGS.appTitle;
     document.title = state.route.name === 'new' ? STRINGS.appTitle : `${pageName} - ${STRINGS.appTitle}`;
@@ -1570,6 +1882,7 @@ function render() {
     // The settings/tasks pages show a scrolling page instead of the chat area (no composer)
     const page = state.route.name === 'settings' ? buildSettingsHtml()
         : state.route.name === 'tasks' ? buildTasksHtml()
+        : state.route.name === 'profile' ? buildProfileHtml()
         : null;
     const main = page !== null
         ? page
@@ -1624,6 +1937,7 @@ function buildSidebarHtml(theme) {
         `<a class="nav-item${routeName === 'new' ? ' active' : ''}" href="#/">${ICONS.newChat}<span>${escapeHtml(STRINGS.navChat)}</span></a>` +
         `<a class="nav-item${routeName === 'settings' ? ' active' : ''}" href="#/settings">${ICONS.gear}<span>${escapeHtml(STRINGS.navSettings)}</span></a>` +
         `<a class="nav-item${routeName === 'tasks' ? ' active' : ''}" href="#/tasks">${ICONS.checklist}<span>${escapeHtml(STRINGS.navTasks)}</span></a>` +
+        `<a class="nav-item${routeName === 'profile' ? ' active' : ''}" href="#/profile">${ICONS.user}<span>${escapeHtml(STRINGS.navProfile)}</span></a>` +
         `</nav>` +
         (work ? `<p class="workspace-label" title="${escapeHtml(state.workspace)}">${ICONS.folder}<span>${escapeHtml(work)}</span></p>` : '') +
         `<p class="chat-list-title">${escapeHtml(STRINGS.chatsHeading)}</p>` +
@@ -1904,6 +2218,8 @@ function onHashChange() {
         loadSettings();
     } else if (state.route.name === 'tasks') {
         loadTasksPage();
+    } else if (state.route.name === 'profile') {
+        loadProfile();
     }
 }
 
@@ -1938,6 +2254,12 @@ function onRootClick(event) {
             submitEmailSettings();
         } else if (action === 'testConnection') {
             testConnection();
+        } else if (action === 'reloadProfile') {
+            loadProfile();
+        } else if (action === 'profile-mode') {
+            setProfileMode(id);
+        } else if (action === 'saveProfile') {
+            submitProfile();
         } else if (action === 'reloadTasks') {
             loadTasksPage();
         } else if (action === 'task-new') {
@@ -2078,9 +2400,13 @@ function onRootKeyDown(event) {
     } else if (event.key === 'Enter' && event.target && event.target.id === 'composer-input' && !event.shiftKey) {
         event.preventDefault();
         submitComposer();
-    } else if (event.key === 'Enter' && event.target && event.target.id === 'workspace-input') {
+    } else if (event.key === 'Enter' && event.target && (event.target.id === 'workspace-input' || event.target.matches?.('label.form-field input[id^="profile-f-"]'))) {
         event.preventDefault();
-        submitWorkspace();
+        if (event.target.id === 'workspace-input') {
+            submitWorkspace();
+        } else {
+            submitProfile();
+        }
     } else if (event.key === 'Enter' && event.target && (event.target.id === 'task-name' || event.target.id === 'task-time' || event.target.id === 'task-numctx')) {
         // Enter inside a task form field - move the focus to the next field instead of submitting
         const focusables = Array.from(document.querySelectorAll('.modal .form-field input, .modal .form-field textarea'));
@@ -2093,10 +2419,12 @@ function onRootKeyDown(event) {
 }
 
 function onRootInput(event) {
-    if (event.target && event.target.id === 'composer-input') {
+    if (event.target && (event.target.id === 'composer-input')) {
         setDraft(event.target.value);
         autoresizeComposer();
         updateSendButton();
+    } else if (event.target && (event.target.id === 'profile-text' || (typeof event.target.id === 'string' && event.target.id.startsWith('profile-f-')))) {
+        updateProfileCounter();
     }
 }
 
@@ -2199,6 +2527,8 @@ async function init() {
         loadSettings();
     } else if (state.route.name === 'tasks') {
         loadTasksPage();
+    } else if (state.route.name === 'profile') {
+        loadProfile();
     } else {
         render();
     }

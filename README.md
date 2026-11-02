@@ -23,6 +23,7 @@
 - **Workspace & long-term memory** — a directory on disk (`~/ollama-chat-workspace` by default) holding `USER.md` (about the user) and `MEMORY.md` (durable notes). The memory is injected into the system prompt for every model turn (`src/ollama_chat/memory.py`), managed from the chat with `/memory`, `/remember`, `/forget`. Set on the **Settings** page (`#/settings`) or via the `OLLAMA_CHAT_WORKSPACE` env var.
 - **Settings and Tasks pages** — the home page is chat-only now: workspace and Gmail (IMAP/SMTP) settings moved to **Settings** (`#/settings`), the task manager moved to **Tasks** (`#/tasks`). The sidebar shows the workspace name and `Settings` / `Tasks` links. The server binds to `127.0.0.1` only.
 - **Gmail / email settings in the app** — IMAP/SMTP host+port, login and an app password are edited on the Settings page and written to `<workspace>/.env` (same format as `.env.example`). The password is write-only: it is never stored in `ollama-chat.json`, never committed to git and never sent back to the browser (only a `hasPassword` flag is returned). **Test connection** logs in to both servers without sending anything.
+- **Profile page (`#/profile`)** — a form (name, profession, country, city, time zone, languages, interests, equipment, reply style, …) that fills `memory/USER.md`; the form can be switched to a raw **Text** mode to edit `USER.md` as markdown. `USER.md` is added to the system prompt of every message (character limit: config key `profileLimit`, default `1500`), and the current date and time (time zone from `USER.md`'s `Timezone` line, or local) are injected with it. API: `GET /getProfile`, `POST /setProfile`.
 
 ## Quick start
 
@@ -155,7 +156,7 @@ The workspace is a directory where the assistant keeps long-term memory:
 
 **Configuring memory size** — config key `memoryLimit` (characters of memory injected into the system prompt, default `3000`; `0` disables injection). When `MEMORY.md` exceeds the limit, only lines matching keywords from your current prompt are injected (falling back to the most recent lines if nothing matches).
 
-**How it works** — `USER.md` and `MEMORY.md` are read before each model turn (`src/ollama_chat/memory.py`) and injected as a `system` message. Memory-only commands (`/memory`, `/remember`, `/forget`) answer locally without calling the model.
+**How it works** — `USER.md` and `MEMORY.md` are read before each model turn (`src/ollama_chat/memory.py`) and injected as a `system` message, together with the **current date and time** (the time zone comes from `USER.md`'s `- Timezone:` line, e.g. `Europe/Warsaw`; without it the local time zone is used). Memory-only commands (`/memory`, `/remember`, `/forget`) answer locally without calling the model.
 
 Usage examples:
 ```
@@ -164,6 +165,49 @@ Usage examples:
 /forget Nova
 /forget -y Nova
 ```
+
+### Profile page
+The Profile page (`#/profile`, link `Profile` in the sidebar) is a convenient editor for
+`memory/USER.md` — the background information about you that is added to the system prompt of
+**every** chat message.
+
+**Form mode** — fields: **Name**, **Profession**, **Country**, **City (optional)**,
+**Time zone** (IANA name, e.g. `Europe/Warsaw` — used for the injected current date and time),
+**Languages**, **Reply language**, **Interests**, **Equipment**, **Not interested in**,
+**Reply style** and a free-form **Other** field. **Save** writes the fields to
+`memory/USER.md` (sections `# About the user` and `# Preferences`, one `- Key: value` bullet per
+field):
+
+```markdown
+# About the user
+
+- Name: Oleg
+- Profession: CAD engineer, 20+ years of experience
+- Country: Poland
+- Timezone: Europe/Warsaw
+- Languages: Russian (native), Polish and English (advanced), German (basic)
+- Interests: programming, static websites, local LLMs
+- Equipment: laptop i9-13900HX, RTX 4070 8 GB, 32 GB RAM
+
+# Preferences
+
+- Reply language: Russian unless asked otherwise
+- Not interested in: Russia news; search Polish news on Polish sites in Polish
+- Reply style: brief and to the point
+```
+
+**Text mode** — switches the page to a raw `USER.md` editor (markdown, as-is). You can keep
+your own sections/bullets there; the form reads known `- Key: value` bullets (case-insensitive)
+and keeps unknown lines in **Other**.
+
+**Character counter** — the page shows the content length against the limit (config key
+`profileLimit`, numbers of characters, default `1500`); the save button is disabled and the
+server rejects the save while the content is over the limit. A warning under the form:
+do **not** enter passwords, secret keys, exact home address or document numbers — `USER.md`
+is sent to the model with every message.
+
+API: `GET /getProfile` (content + `limit`), `POST /setProfile` (errors `ProfileTooLong`,
+`BadProfile`).
 
 ### Settings page
 The Settings page (`#/settings`, link `Settings` in the sidebar) holds everything that used to

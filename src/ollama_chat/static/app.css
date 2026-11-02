@@ -305,6 +305,13 @@ button.model-pill:hover { background: var(--accent-soft); color: var(--accent); 
 .form-hint { font-size: 11px; color: var(--muted); font-weight: 400; margin: 0; }
 .panel-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .panel-actions.tasks-header { margin: 0 0 10px; }
+
+
+/* Profile page */
+#profile-counter { margin-left: auto; align-self: center; font-size: 12px; color: var(--muted); }
+#profile-counter.limit-over { color: var(--accent); font-weight: 600; }
+#profile-text { font-family: var(--font-mono); font-size: 13px; }
+.form-field .form-hint { margin-top: 4px; }
 .status-ok { color: var(--green); font-size: 12.5px; margin-top: 12px; overflow-wrap: anywhere; }
 .status-err { color: var(--accent); font-size: 12.5px; margin-top: 12px; overflow-wrap: anywhere; }
 

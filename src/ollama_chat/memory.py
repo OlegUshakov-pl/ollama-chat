@@ -9,10 +9,14 @@ import datetime
 import os
 import pathlib
 import re
+import zoneinfo
 
 
 # The default memory character limit
 MEMORY_LIMIT_DEFAULT = 3000
+
+# The default user profile (USER.md) character limit
+PROFILE_LIMIT_DEFAULT = 1500
 
 # The default workspace directory
 DEFAULT_WORKSPACE_NAME = 'ollama-chat-workspace'
@@ -69,6 +73,14 @@ def read_memory_file(workspace, filename):
             return fh.read()
     except OSError:
         return ''
+
+
+# Write a workspace memory file (USER.md or MEMORY.md), creating the memory directory if needed
+def write_memory_file(workspace, filename, content):
+    ensure_workspace(workspace)
+    path = memory_file_path(workspace, filename)
+    with open(path, 'w', encoding='utf-8') as fh:
+        fh.write(content)
 
 
 # The workspace memory file path - USER.md or MEMORY.md - checked to be inside the workspace
@@ -194,6 +206,41 @@ def _ensure_default_file(path, content):
     if not os.path.isfile(path):
         with open(path, 'w', encoding='utf-8') as fh:
             fh.write(content)
+
+
+# The user's zoneinfo time zone, from USER.md's "- Timezone:" line, or None. USER.md is
+# human-edited, so an unparseable zone name is ignored.
+def user_timezone(workspace):
+    content = read_memory_file(workspace, USER_MEMORY_FILENAME)
+    match = re.search(r'^- Timezone: *(.+)$', content, re.MULTILINE | re.IGNORECASE)
+    if match is None:
+        return None
+    try:
+        return zoneinfo.ZoneInfo(match.group(1).strip())
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError, OSError, KeyError):
+        # Missing tzdata on Windows raises the same errors - fall back to local time
+        return None
+
+
+# The current date and time context to inject into the chat's system prompt, or None when the
+# workspace has no memory directory (the date/time injection is part of the workspace memory).
+def time_context(workspace):
+    if not os.path.isdir(str(pathlib.Path(str(workspace), 'memory'))):
+        return None
+    timezone = user_timezone(workspace)
+    if timezone is None:
+        now = datetime.datetime.now().astimezone()
+    else:
+        now = datetime.datetime.now(timezone)
+    timezone_name = getattr(now.tzinfo, 'key', None) or f'UTC{now:%z}'
+    return  \
+        f'Current date and time: {_WEEKDAY_NAMES[now.weekday()]}, {now:%Y-%m-%d %H:%M} ' \
+        f'({timezone_name})'
+
+
+# The English weekday abbreviations used by time_context - date strings must not depend on
+# the process locale
+_WEEKDAY_NAMES = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')
 
 
 # Resolve a path relative to the workspace and verify it doesn't escape the workspace
