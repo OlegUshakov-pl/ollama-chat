@@ -1175,7 +1175,7 @@ function buildPageHtml(titleText, innerHtml) {
 
 function buildSettingsHtml() {
     const form = state.settings;
-    if (form.loading) {
+    if (form.loading || !form.data) {
         return buildPageHtml(STRINGS.settingsHeading, `<p class="page-status">${escapeHtml(STRINGS.loading)}</p>`);
     }
     if (form.error && !form.data) {
