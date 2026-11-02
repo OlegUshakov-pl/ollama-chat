@@ -63,9 +63,10 @@ def docx_data(*paragraphs):
 class TestChatManager(unittest.TestCase):
 
     def setUp(self):
-        # Keep chat tests deterministic - isolate from any real workspace memory
+        # Keep chat tests deterministic - point the workspace at a non-existent path, so real
+        # workspace memory (memory files and the date/time context) is never picked up
         env_patcher = unittest.mock.patch.dict(os.environ)
-        os.environ.pop('OLLAMA_CHAT_WORKSPACE', None)
+        os.environ['OLLAMA_CHAT_WORKSPACE'] = os.path.join(os.getcwd(), 'no-such-workspace')
         self.addCleanup(env_patcher.stop)
         env_patcher.start()
 
