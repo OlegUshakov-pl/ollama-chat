@@ -14,6 +14,7 @@ import email.policy
 import html
 import imaplib
 import os
+import pathlib
 import re
 import smtplib
 import ssl
@@ -151,6 +152,46 @@ def _port_value(value, default_port):
         return int(value)
     except (TypeError, ValueError):
         return default_port
+
+
+# The email settings summary, for the settings page - the saved password is never included,
+# only whether one exists
+def get_email_settings(workspace=None):
+    env = _load_env(workspace)
+    return {
+        'imapHost': env.get('EMAIL_IMAP_HOST', ''),
+        'imapPort': _port_value(env.get('EMAIL_IMAP_PORT'), 993),
+        'smtpHost': env.get('EMAIL_SMTP_HOST', ''),
+        'smtpPort': _port_value(env.get('EMAIL_SMTP_PORT'), 465),
+        'user': env.get('EMAIL_USER', ''),
+        'hasPassword': bool(env.get('EMAIL_PASSWORD'))
+    }
+
+
+# Save the email settings into a workspace's ".env" file. The workspace's ".env" (the first
+# file ".env" files are read from) means the settings are used by both the chat app and the
+# scheduled tasks. An empty (or missing) password keeps the saved password, so the password
+# is never returned to - nor sent back by - the browser more than once. Unknown keys (like
+# EMAIL_FROM) are preserved. Always passes the password through to the file in plain text.
+def save_email_settings(workspace, imap_host, imap_port, smtp_host, smtp_port, user, password=None):
+    directory = pathlib.Path(workspace)
+    directory.mkdir(parents=True, exist_ok=True)
+    env_path = directory / '.env'
+
+    # Preserve unknown keys and comments won't survive; keep any other KEY=VALUE lines
+    values = _load_env_file(str(env_path))
+    values.update({
+        'EMAIL_IMAP_HOST': str(imap_host or '').strip(),
+        'EMAIL_IMAP_PORT': str(_port_value(imap_port, 993)),
+        'EMAIL_SMTP_HOST': str(smtp_host or '').strip(),
+        'EMAIL_SMTP_PORT': str(_port_value(smtp_port, 465)),
+        'EMAIL_USER': str(user or '').strip(),
+    })
+    if password:
+        values['EMAIL_PASSWORD'] = str(password).strip()
+
+    with open(env_path, 'w', encoding='utf-8') as env_fh:
+        env_fh.writelines(f'{key}={values[key]}\n' for key in sorted(values))
 
 
 # Connect and log in to the IMAP server
@@ -313,3 +354,69 @@ def _to_addresses(to):
     if not addresses:
         raise ValueError('missing "to" argument')
     return addresses
+
+
+# Check the email settings - log in to the IMAP server and the SMTP server. Returns a short,
+# human-readable summary. Raises a ValueError on connection or login failures.
+def test_email_connection(workspace=None):
+    failures = []
+    results = []
+
+    # IMAP - connect and log in
+    try:
+        host, port, user, password = _imap_config(_load_env(workspace))
+        imap = _imap_connect(host, port, user, password)
+        try:
+            imap.logout()
+        except (imaplib.IMAP4.error, OSError):
+            pass
+        results.append(f'IMAP: logged in to {host}:{port}')
+    except ValueError as exc:
+        failures.append(f'IMAP: {exc}')
+
+    # SMTP - connect and log in (no email is sent)
+    try:
+        env = _load_env(workspace)
+        config = _email_config(env, ('EMAIL_SMTP_HOST', 'EMAIL_SMTP_PORT', 'EMAIL_USER', 'EMAIL_PASSWORD'))
+        host = config['EMAIL_SMTP_HOST']
+        port = _port_value(config['EMAIL_SMTP_PORT'], 465)
+        user, password = config['EMAIL_USER'], config['EMAIL_PASSWORD']
+        _smtp_login(host, port, user, password)
+        results.append(f'SMTP: logged in to {host}:{port}')
+    except ValueError as exc:
+        failures.append(f'SMTP: {exc}')
+
+    if failures:
+        raise ValueError('; '.join(failures))
+    return '; '.join(results)
+
+
+# Connect to an SMTP server and log in, without sending anything
+def _smtp_login(host, port, user, password):
+    try:
+        if port == 465:
+            smtp = smtplib.SMTP_SSL(host, port, timeout=30)
+        else:
+            smtp = smtplib.SMTP(host, port, timeout=30)
+    except (smtplib.SMTPException, ssl.SSLError, socket.error, OSError, TimeoutError, ValueError) as exc:
+        raise ValueError(f'cannot connect to the SMTP server "{host}:{port}" ({exc})') from None
+    try:
+        if port != 465:
+            try:
+                status, _response = smtp.starttls(context=ssl.create_default_context())
+            except (smtplib.SMTPException, ssl.SSLError, socket.error, OSError) as exc:
+                raise ValueError(f'cannot start TLS on the SMTP server "{host}:{port}" ({exc})') from None
+            if status != 220:
+                raise ValueError(f'cannot start TLS on the SMTP server "{host}:{port}" (HTTP {status})')
+        try:
+            smtp.login(user, password)
+        except smtplib.SMTPAuthenticationError:
+            raise ValueError(
+                f'SMTP login failed for "{user}": check EMAIL_USER and EMAIL_PASSWORD in ".env"'
+            ) from None
+        return None
+    finally:
+        try:
+            smtp.quit()
+        except (smtplib.SMTPException, socket.error, OSError):
+            pass

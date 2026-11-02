@@ -20,7 +20,9 @@
 - **Markdown viewer (.md preview in chat)** — button next to theme toggle in sidebar toolbar. Opens system file picker (`accept=".md,.markdown"`), reads file with `FileReader` and renders it **inside the chat area** via `marked` + `DOMPurify` (`src/ollama_chat/static/app.js:505`, `src/ollama_chat/static/app.css:987`). Header shows filename + `Close preview` button, `Esc` also closes. No upload to server, works offline.
 - **Reliable rename** — `Rename` in chat menu now updates both sidebar and open header instantly and awaits `POST /setConversationTitle` before navigation (`src/ollama_chat/static/app.js:885`, `src/ollama_chat/static/ollamaChatConversation.bare:312`).
 - **One-click Windows launch — `start.bat` / `install.bat`** — `install.bat` clones to clean folder + creates `.venv`, `start.bat` creates `.venv` if missing and forwards all args to `ollama-chat` (e.g. `start.bat -p 8080`).
-- **Workspace & long-term memory** — a directory on disk (`~/ollama-chat-workspace` by default) holding `USER.md` (about the user) and `MEMORY.md` (durable notes). The memory is injected into the system prompt for every model turn (`src/ollama_chat/memory.py`), managed from the chat with `/memory`, `/remember`, `/forget`. Set from the home page (`Workspace: Change`) or the `OLLAMA_CHAT_WORKSPACE` env var.
+- **Workspace & long-term memory** — a directory on disk (`~/ollama-chat-workspace` by default) holding `USER.md` (about the user) and `MEMORY.md` (durable notes). The memory is injected into the system prompt for every model turn (`src/ollama_chat/memory.py`), managed from the chat with `/memory`, `/remember`, `/forget`. Set on the **Settings** page (`#/settings`) or via the `OLLAMA_CHAT_WORKSPACE` env var.
+- **Settings and Tasks pages** — the home page is chat-only now: workspace and Gmail (IMAP/SMTP) settings moved to **Settings** (`#/settings`), the task manager moved to **Tasks** (`#/tasks`). The sidebar shows the workspace name and `Settings` / `Tasks` links. The server binds to `127.0.0.1` only.
+- **Gmail / email settings in the app** — IMAP/SMTP host+port, login and an app password are edited on the Settings page and written to `<workspace>/.env` (same format as `.env.example`). The password is write-only: it is never stored in `ollama-chat.json`, never committed to git and never sent back to the browser (only a `hasPassword` flag is returned). **Test connection** logs in to both servers without sending anything.
 
 ## Quick start
 
@@ -86,11 +88,13 @@ ollama-chat -t askAristotle -v question "Why is the sky blue?"
 - **Rename / Delete / Download .md / Regenerate** per chat
 - Prompt commands `/file`, `/dir`, `/image`, `/url`, `/memory`, `/remember`, `/forget`, `/do`, `/?`, `/tasks`, `/task`
 - **Workspace memory** (`USER.md` + `MEMORY.md`) injected into every model turn
-- **Scheduled tasks** (cron) — daily/weekly reports run by the in-app scheduler or Windows Task Scheduler, saved to workspace memory
+- **Settings page** (`#/settings`) — workspace folder and Gmail IMAP/SMTP settings with a connection test; the app password lives in `<workspace>/.env` only
+- **Scheduled tasks** (cron) — daily/weekly reports run by the in-app scheduler or Windows Task Scheduler, saved to workspace memory; managed on the Tasks page (`#/tasks`)
 - Conversation templates with `{{var}}` substitution
 - Model browser, download, monitor, selection, streaming
 - Show/hide thinking, Markdown/text view, export as Markdown
 - Light / dark themes, responsive layout
+- Local-only server — binds to `127.0.0.1` and is not reachable from the network
 
 ## Usage
 
@@ -145,7 +149,7 @@ The workspace is a directory where the assistant keeps long-term memory:
 ```
 
 **Choosing the workspace** — priority order:
-1. Config key `workspace` in `ollama-chat.json` (set via **Workspace: Change** on the home page or `POST /setWorkspace`)
+1. Config key `workspace` in `ollama-chat.json` (set on the **Settings** page → **Workspace** → **Save workspace**, or `POST /setWorkspace`; the folder is created if needed and its existence/writability is verified server-side)
 2. Environment variable `OLLAMA_CHAT_WORKSPACE`
 3. Default: `~/ollama-chat-workspace`
 
@@ -161,23 +165,73 @@ Usage examples:
 /forget -y Nova
 ```
 
-### Conversation templates
-- **Create:** `Add Template` (home) or `Template` (conversation page)
-- **Run:** click title on home; if variables `{{var}}`, prompts for values then creates conversation
-- **Edit:** home → `Select` → `Edit` (title, name, variables, prompts)
+### Settings page
+The Settings page (`#/settings`, link `Settings` in the sidebar) holds everything that used to
+live in forms on the home page.
+
+**Workspace** — the workspace folder path and a **Save workspace** button (see above). Memory
+files, `tasks.json`, `logs/`, `daily/` reports and PDF exports all live under this folder.
+
+**Gmail (IMAP / SMTP)** — for the email tools (`check_email` in chat, `send_email` / `check_email`
+in scheduled tasks):
+
+| Field | Meaning |
+|---|---|
+| IMAP server / IMAP port | e.g. `imap.gmail.com:993` (implicit SSL) |
+| SMTP server / SMTP port | e.g. `smtp.gmail.com:465` (implicit SSL) or `:587` (STARTTLS) |
+| Account (login) | your e-mail address, e.g. `you@gmail.com` |
+| App password | a Google **application password**, not your main one |
+
+**Where the password is stored** — all of the above is written to **`<workspace>/.env`**
+(the first `.env` file read from — see `.env.example` for the plain-text format):
+
+```
+EMAIL_IMAP_HOST=imap.gmail.com
+EMAIL_IMAP_PORT=993
+EMAIL_SMTP_HOST=smtp.gmail.com
+EMAIL_SMTP_PORT=465
+EMAIL_USER=you@gmail.com
+EMAIL_PASSWORD=your-application-password
+```
+
+The app password is write-only by design:
+
+- it is **never** stored in `ollama-chat.json` (the config file) and must never be committed to git (`.env` is in `.gitignore`);
+- opening the Settings page again shows the password field **empty** with a `(saved)` placeholder — the saved password is never sent back to the browser, only the `hasPassword` flag;
+- saving with an empty password keeps the previously saved password.
+
+**Test connection** — logs in to the configured IMAP and SMTP servers (SMTP login only, no e-mail
+is sent) and reports success or a per-protocol error.
 
 ### Scheduled tasks
 Tasks run a prompt on a schedule (like cron) without a conversation: they read the workspace memory,
 may use the web tools (`web_search`, `fetch_page`), generate a report with the same tool-calling loop
 as a chat, and **append the report to `<workspace>/memory/daily/YYYY-MM-DD.md`** with the task name
 and time as the heading. Errors never crash the scheduler — they are logged to
-`<workspace>/logs/YYYY-MM-DD.log` and shown in `/tasks` and on the home page.
+`<workspace>/logs/YYYY-MM-DD.log` and shown in `/tasks` and on the Tasks page.
 
 Tasks are stored in `<workspace>/tasks.json` — each task has `id` (unique, derived from the name),
 `name`, `time` (`HH:MM`), `days` (ISO weekdays `1=Mon`…`7=Sun`), `prompt`, `model`, `num_ctx`,
-`tools` (read-only tools only), `dest`, plus the `lastRun`/`lastError` maintenance fields.
+`tools`, `enabled`, `dest`, plus the `lastRun`/`lastError` maintenance fields. Tasks created before
+the `enabled` field (or without it) are enabled.
 
-**Managing tasks** — prompt commands or the **Tasks** list on the home page:
+### Tasks page
+The Tasks page (`#/tasks`, link `Tasks` in the sidebar) manages `tasks.json` directly:
+
+- **list** — every task with its enable-toggle (`enabled` on/off, a disabled task never runs and is
+  skipped by the scheduler), schedule (`HH:MM · days`), model, tools, last run time and last error;
+  the list refreshes every 4 seconds while the page is open;
+- **New task / Edit** — a form with name, run time, run days (Mon–Sun toggles), prompt text, model
+  picker, `num_ctx` (empty = default) and allowed tools. `send_email` is **opt-in** (unchecked by
+  default): a task sending e-mail has no confirmation step, so it only works when the task's tools
+  explicitly include it;
+- **Run now** — runs the task in the background immediately (the result appears in the workspace
+  `memory/daily/` report and in the task's log);
+- **Log** — the task's run log (the lines mentioning the task in `<workspace>/logs/*.log`,
+  oldest first);
+- **Delete** — with a confirmation dialog.
+
+The prompt commands from before still work identically:
 
 ```
 /tasks                                   # list tasks (same as /task list)
@@ -187,10 +241,15 @@ Tasks are stored in `<workspace>/tasks.json` — each task has `id` (unique, der
 /task remove briefing
 ```
 
-Default `-d` is `all`. Default `--tools` is `web_search,fetch_page`; write tools (`send_email`, …)
-are never allowed in tasks. The default model is the current model. If the time-slot is skipped
-(app off), the task is missed-catch-up run at startup when the config key `tasksCatchUp` is not
-`false`.
+Default `-d` is `all`. Default `--tools` is `web_search,fetch_page,check_email` (adding
+`send_email` to `--tools` opts the task in to sending e-mail, see above). The default model is the
+current model. If the time-slot is skipped (app off), the task is missed-catch-up run at startup
+when the config key `tasksCatchUp` is not `false`.
+
+### Conversation templates
+- **Create:** `Add Template` (home) or `Template` (conversation page)
+- **Run:** click title on home; if variables `{{var}}`, prompts for values then creates conversation
+- **Edit:** home → `Select` → `Edit` (title, name, variables, prompts)
 
 **Running tasks with the Windows Task Scheduler** — the `run_task.py` script runs one task and
 exits, so the app doesn't need to be running:
@@ -230,11 +289,15 @@ POST /exportPdf  {"file": "daily/2026-01-15.md"} # <workspace>/memory/daily/YYYY
 
 ### Interface and themes
 
-The UI uses a clean, minimal style (Jan AI / Claude Code inspired): flat panels with straight corners
-(`--radius: 0`), a warm light theme and a dark theme, a compact sidebar, a centered chat column,
+The UI uses a clean, minimal style (Jan AI / Claude Code inspired): a flat white light theme with
+straight corners (`--radius: 0`) and a dark theme, a compact sidebar, a centered chat column,
 collapsible thinking and tool-call blocks, and code blocks with a copy button. Theme choice is persisted
 in `localStorage` and follows `prefers-color-scheme` by default. The sidebar collapses on mobile and
 opens via the menu button.
+
+The sidebar doubles as the app navigation: **Chat** (new chat), **Settings** and **Tasks** links and
+the current workspace folder name; below it is the chat list. The home page itself is chat-only —
+no workspace/tasks forms.
 
 ## Add a desktop launcher
 
@@ -260,7 +323,7 @@ nano $HOME/.local/share/applications/ollama-chat.desktop
 
 [Ollama Chat File Format](https://craigahobbs.github.io/ollama-chat/api.html#var.vName='OllamaChatConfig')
 [Ollama Chat API](https://craigahobbs.github.io/ollama-chat/api.html)
-Schema: `src/ollama_chat/static/ollamaChat.smd` — fork adds `think`/`files`/`search` to `StartConversation`/`ReplyConversation`/`StartTemplate`, `tools` to `ConversationExchange`, `tasks`/`TaskInfo` to `getConversations`, `workspace`/`memoryLimit`/`tasksCatchUp` to `OllamaChatConfig` plus the `setWorkspace` endpoint, and the `exportPdf` endpoint.
+Schema: `src/ollama_chat/static/ollamaChat.smd` — fork adds `think`/`files`/`search` to `StartConversation`/`ReplyConversation`/`StartTemplate`, `tools` to `ConversationExchange`, `tasks`/`TaskInfo` to `getConversations`, `workspace`/`memoryLimit`/`tasksCatchUp` to `OllamaChatConfig` plus the `setWorkspace` endpoint, and the `exportPdf` endpoint. The Settings/Tasks pages add the `getSettings`, `setEmailSettings`, `testEmailConnection`, `getTasks`, `setTask`, `deleteTask`, `runTask` and `getTaskLog` endpoints with the `TaskDetails`/`TaskInput`/`TaskLog`/`EmailSettings`/`SettingsInfo` types.
 
 ## Development
 

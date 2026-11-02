@@ -32,6 +32,8 @@ const STRINGS = {
     close: 'Close',
     deleteTitle: 'Delete chat',
     deleteConfirm: 'Delete this chat? This cannot be undone.',
+    deleteTaskTitle: 'Delete task',
+    deleteTaskConfirm: 'Delete this scheduled task? This cannot be undone.',
     deleteButton: 'Delete',
     generating: 'Generating…',
     thinkingNow: 'Thinking…',
@@ -75,6 +77,63 @@ const STRINGS = {
     openMd: 'Open markdown',
     mdViewerTitle: 'Markdown preview',
     mdClose: 'Close preview',
+    navSettings: 'Settings',
+    navTasks: 'Tasks',
+    settingsHeading: 'Settings',
+    settingsWorkspace: 'Workspace',
+    workspaceLabel: 'Workspace folder',
+    workspaceHint: 'Memory files, tasks, logs, reports and exports live here.',
+    workspaceSave: 'Save workspace',
+    workspaceSaved: 'Workspace saved',
+    workspaceError: 'The folder does not exist and could not be created (or is not writable).',
+    settingsGmail: 'Gmail (IMAP / SMTP)',
+    imapHostLabel: 'IMAP server',
+    imapPortLabel: 'IMAP port',
+    smtpHostLabel: 'SMTP server',
+    smtpPortLabel: 'SMTP port',
+    emailUserLabel: 'Account (login)',
+    emailUserHint: 'For Gmail, your e-mail address, e.g. you@gmail.com.',
+    emailPasswordLabel: 'App password',
+    emailPasswordHint: 'Stored on the server in .env and never sent back to the browser.',
+    emailPasswordSave: 'Leave empty to keep the saved password.',
+    emailPasswordSavedPlaceholder: '•••••••• (saved)',
+    settingsSaveEmail: 'Save',
+    emailSaved: 'Email settings saved',
+    testConnection: 'Test connection',
+    testing: 'Testing…',
+    connectionHint: 'This checks the saved settings - save first.',
+    connectionOk: 'Connection OK',
+    portHint: 'Port',
+    tasksHeading: 'Tasks',
+    newTask: 'New task',
+    noTasks: 'No scheduled tasks yet.',
+    taskNewTitle: 'New task',
+    taskEditTitle: 'Edit task',
+    taskNameLabel: 'Name',
+    taskTimeLabel: 'Run time',
+    taskDaysLabel: 'Run days',
+    dayNames: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    taskPromptLabel: 'Task prompt',
+    taskModelLabel: 'Model',
+    taskNumCtxLabel: 'Context size (num_ctx)',
+    taskNumCtxHint: 'Leave empty for the default context size.',
+    taskToolsLabel: 'Allowed tools',
+    sendEmailDefaultOff: 'off by default - a task sending email is not confirmed by anyone',
+    taskEnabledLabel: 'Enabled',
+    taskRunNow: 'Run now',
+    taskStarted: 'Task started - see the workspace logs for the result',
+    taskLastRun: 'Last run',
+    taskSchedule: 'Schedule',
+    taskEditing: 'Editing',
+    scheduleEveryDay: 'every day',
+    taskSaveLabel: 'Save task',
+    taskLogTitle: 'Task log',
+    noTaskLog: 'No log entries for this task yet.',
+    toolsTaskWebSearch: 'Web search',
+    toolsTaskFetchPage: 'Open pages',
+    toolsTaskCheckEmail: 'Read email',
+    toolsTaskSendEmail: 'Send email',
+    everyDayShort: 'Every day',
 };
 
 /** Inline SVG icons (contour style, 20px, stroke 1.75, currentColor). */
@@ -103,10 +162,21 @@ const ICONS = {
     upload: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
     clip: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57a4 4 0 1 1 5.66 5.66l-8.58 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
     md: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg>',
+    gear: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+    checklist: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h12"/><path d="M9 12h12"/><path d="M9 18h12"/><path d="m3 6 1 1 2-2"/><path d="m3 12 1 1 2-2"/><path d="m3 18 1 1 2-2"/></svg>',
+    play: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 9-14 9Z"/></svg>',
+    folder: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h5l2 2h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>',
+    edit: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
 };
 
 /** Poll interval (ms) while a response is generating. */
 const POLL_MS = 400;
+
+/** Poll interval (ms) for the tasks page list refresh. */
+const TASKS_POLL_MS = 4000;
+
+/** The task tools thetasks form offers, in order (send_email is opt-in: unchecked). */
+const TASK_FORM_TOOLS = ['web_search', 'fetch_page', 'check_email', 'send_email'];
 
 /** Maximum number of files that can be attached to a single message. */
 const MAX_ATTACH_FILES = 10;
@@ -147,6 +217,11 @@ const state = {
     notice: null,
     uploading: false,
     mdViewer: null,
+    workspace: null,
+    settings: { loading: false, error: null, data: null, saving: false, test: null, notice: null, savingEmail: false },
+    tasksPage: { loading: false, error: null, items: null, timer: null },
+    taskForm: null,
+    taskLog: null,
 };
 
 function loadThinkingEnabled() {
@@ -255,11 +330,27 @@ function readFilesAsData(files) {
 
 function parseRoute() {
     const hash = window.location.hash || '#/';
+    if (hash === '#/settings') {
+        return { name: 'settings' };
+    }
+    if (hash === '#/tasks') {
+        return { name: 'tasks' };
+    }
     const match = hash.match(/^#\/c\/([A-Za-z0-9-]+)/);
     if (match) {
         return { name: 'chat', id: match[1] };
     }
     return { name: 'new' };
+}
+
+/** The workspace folder's display name (the workspace path's last segment). */
+function workspaceName() {
+    const path = state.workspace || '';
+    if (!path) {
+        return '';
+    }
+    const parts = String(path).split(/[\\/]/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : path;
 }
 
 function draftKey() {
@@ -396,6 +487,357 @@ async function exportCurrentChatPdf() {
         state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
         render();
     }
+}
+
+/* ---------- Settings page ---------- */
+
+async function loadSettings() {
+    state.settings = { ...state.settings, loading: true, error: null, test: null, notice: null };
+    render();
+    try {
+        const data = await apiGet('getSettings');
+        state.settings.data = data;
+        state.settings.loading = false;
+        state.workspace = data.workspace;
+    } catch (err) {
+        state.settings.loading = false;
+        state.settings.error = err.message;
+    }
+    render();
+}
+
+/** Save the workspace folder (the server creates it and verifies it is writable). */
+async function submitWorkspace() {
+    const input = document.getElementById('workspace-input');
+    const path = input ? input.value.trim() : '';
+    if (!path) {
+        return;
+    }
+    state.settings.saving = true;
+    state.settings.error = null;
+    state.settings.notice = null;
+    render();
+    try {
+        const data = await apiPost('setWorkspace', { path });
+        state.workspace = data.workspace;
+        state.settings.data = { ...state.settings.data, workspace: data.workspace };
+        state.settings.saving = false;
+        state.settings.notice = STRINGS.workspaceSaved;
+    } catch (err) {
+        state.settings.saving = false;
+        state.settings.error = err.message;
+    }
+    render();
+}
+
+/** Save the email settings. The password field is sent only when the user typed one. */
+async function submitEmailSettings() {
+    const form = state.settings;
+    if (!form.data) {
+        return;
+    }
+    const read = (id) => (document.getElementById(id) ? document.getElementById(id).value : '');
+    const body = {
+        imapHost: read('email-imap-host'),
+        imapPort: read('email-imap-port') || undefined,
+        smtpHost: read('email-smtp-host'),
+        smtpPort: read('email-smtp-port') || undefined,
+        user: read('email-user'),
+    };
+    const password = read('email-password');
+    if (password) {
+        body.password = password;
+    }
+    if (!body.imapHost) {
+        state.settings.error = `${STRINGS.imapHostLabel}: required`;
+    } else if (!body.smtpHost) {
+        state.settings.error = `${STRINGS.smtpHostLabel}: required`;
+    } else {
+        state.settings.savingEmail = true;
+        state.settings.error = null;
+        state.settings.notice = null;
+        render();
+        try {
+            await apiPost('setEmailSettings', body);
+            const data = await apiGet('getSettings');
+            state.settings.data = data;
+            state.settings.savingEmail = false;
+            state.settings.notice = STRINGS.emailSaved;
+        } catch (err) {
+            state.settings.savingEmail = false;
+            state.settings.error = err.message;
+        }
+    }
+    render();
+}
+
+/** Check the saved email settings (IMAP + SMTP logins). */
+async function testConnection() {
+    state.settings.test = { running: true };
+    render();
+    try {
+        const data = await apiPost('testEmailConnection');
+        state.settings.test = { running: false, ok: true, message: data.message };
+    } catch (err) {
+        state.settings.test = { running: false, ok: false, message: err.message };
+    }
+    render();
+}
+
+/* ---------- Tasks page ---------- */
+
+/** The run-days text, e.g. "every day" or "Mon, Thu". */
+function taskDaysText(days) {
+    const dayList = Array.isArray(days) ? days : [];
+    if (dayList.length === 7) {
+        return STRINGS.everyDayShort;
+    }
+    return dayList.map((day) => STRINGS.dayNames[day - 1]).join(', ') || '—';
+}
+
+async function loadTasksPage() {
+    stopTasksPolling();
+    state.tasksPage = { ...state.tasksPage, loading: true, error: null };
+    render();
+    try {
+        const data = await apiGet('getTasks');
+        state.tasksPage.items = data.tasks || [];
+        state.tasksPage.loading = false;
+    } catch (err) {
+        state.tasksPage.loading = false;
+        state.tasksPage.error = err.message;
+    }
+    render();
+    scheduleTasksPoll();
+}
+
+/**
+ * While the tasks page is open, refresh the list every few seconds so "Run now" results and
+ * the scheduler's lastRun updates appear.
+ */
+function scheduleTasksPoll() {
+    if (state.route.name !== 'tasks') {
+        return;
+    }
+    state.tasksPage.timer = setTimeout(async () => {
+        state.tasksPage.timer = null;
+        if (state.route.name !== 'tasks' || state.taskForm || state.taskLog) {
+            scheduleTasksPoll();
+            return;
+        }
+        try {
+            const data = await apiGet('getTasks');
+            state.tasksPage.items = data.tasks || [];
+            if (state.tasksPage.error) {
+                state.tasksPage.error = null;
+                render();
+            } else {
+                patchTasksList();
+            }
+        } catch (err) {
+            state.tasksPage.error = err.message;
+            patchTasksList();
+        }
+        scheduleTasksPoll();
+    }, TASKS_POLL_MS);
+}
+
+function stopTasksPolling() {
+    if (state.tasksPage.timer) {
+        clearTimeout(state.tasksPage.timer);
+        state.tasksPage.timer = null;
+    }
+    if (state.taskForm || state.taskLog) {
+        return;
+    }
+    state.tasksPage.items = null;
+    state.tasksPage.error = null;
+}
+
+/** Re-render only the tasks list (keeps scroll position). */
+function patchTasksList() {
+    const list = document.getElementById('tasks-list');
+    if (list) {
+        list.innerHTML = buildTasksListHtml();
+    }
+}
+
+/** Open the task form - with a task (edit) or without (create). */
+function openTaskForm(task) {
+    state.taskForm = task
+        ? {
+            id: task.id,
+            name: task.name || '',
+            time: task.time || '',
+            days: new Set((task.days || []).map(Number)),
+            prompt: task.prompt || '',
+            model: task.model || '',
+            numCtx: task.numCtx != null ? String(task.numCtx) : '',
+            tools: new Set(task.tools || []),
+            enabled: task.enabled !== false,
+            error: null,
+            saving: false
+        }
+        : {
+            id: null,
+            name: '',
+            time: '09:00',
+            days: new Set([1, 2, 3, 4, 5, 6, 7]),
+            prompt: '',
+            model: '',
+            numCtx: '',
+            tools: new Set(['web_search', 'fetch_page', 'check_email']),
+            enabled: true,
+            error: null,
+            saving: false
+        };
+    render();
+}
+
+async function submitTaskForm() {
+    const form = state.taskForm;
+    if (!form || form.saving) {
+        return;
+    }
+    const input = (id) => (document.getElementById(id) ? document.getElementById(id).value : '');
+    const name = input('task-name').trim();
+    const time = input('task-time');
+    const prompt = document.getElementById('task-prompt') ? document.getElementById('task-prompt').value : '';
+    const numCtx = input('task-numctx');
+    if (!name || !form.days.size) {
+        form.error = !name ? `${STRINGS.taskNameLabel}: required` : `${STRINGS.taskDaysLabel}: required`;
+        render();
+        return;
+    }
+    form.saving = true;
+    form.error = null;
+    render();
+    const body = {
+        name,
+        time,
+        days: [...form.days],
+        model: (document.getElementById('task-model') ? document.getElementById('task-model').value : '') || form.model || composerModel() || '',
+        prompt,
+        tools: [...form.tools],
+    };
+    if (form.id) {
+        body.id = form.id;
+    }
+    if (numCtx) {
+        body.numCtx = Number(numCtx);
+    }
+    body.enabled = form.enabled;
+    try {
+        await apiPost('setTask', body);
+        state.taskForm = null;
+        state.notice = null;
+        window.setTimeout(loadTasksPage, 250);
+        return null;
+    } catch (err) {
+        form.saving = false;
+        form.error = err.message;
+        render();
+    }
+    return null;
+}
+
+function setTaskFormField(field, id, on) {
+    const form = state.taskForm;
+    if (!form) {
+        return;
+    }
+    if (field === 'day') {
+        if (on) {
+            form.days.add(id);
+        } else {
+            form.days.delete(id);
+        }
+    } else if (field === 'tool') {
+        if (on) {
+            form.tools.add(id);
+        } else {
+            form.tools.delete(id);
+        }
+    } else {
+        form[field] = on;
+    }
+    render();
+}
+
+/** Toggle a task's enabled state in the list. */
+async function toggleTask(taskId) {
+    const item = (state.tasksPage.items || []).find((task) => task.id === taskId);
+    if (!item) {
+        return;
+    }
+    const body = {
+        id: item.id,
+        name: item.name,
+        time: item.time,
+        days: item.days || [],
+        model: item.model,
+        prompt: item.prompt || '',
+        tools: item.tools || [],
+        enabled: !(item.enabled !== false),
+    };
+    if (item.numCtx != null) {
+        body.numCtx = item.numCtx;
+    }
+    try {
+        await apiPost('setTask', body);
+        scheduleTasksPoll();
+    } catch (err) {
+        state.tasksPage.error = err.message;
+        patchTasksList();
+    }
+}
+
+/** Run a task now - the server runs it in the background. */
+async function runTaskNow(taskId) {
+    try {
+        await apiPost('runTask', { id: taskId });
+        state.notice = STRINGS.taskStarted;
+        render();
+    } catch (err) {
+        state.tasksPage.error = err.message;
+        patchTasksList();
+    }
+}
+
+/** Delete a task (confirm via the shared modal). */
+function openTaskDelete(taskId) {
+    const item = (state.tasksPage.items || []).find((task) => task.id === taskId);
+    state.modal = { type: 'delete-task', id: taskId, title: item ? item.name : taskId, error: null };
+    render();
+}
+
+async function submitTaskDelete() {
+    const id = state.modal.id;
+    try {
+        await apiPost('deleteTask', { id });
+        state.modal = null;
+        if (state.taskForm && state.taskForm.id === id) {
+            state.taskForm = null;
+        }
+        await loadTasksPage();
+    } catch (err) {
+        state.modal.error = err.message;
+        render();
+    }
+}
+
+/** Show a task's run log. */
+async function openTaskLog(taskId) {
+    const item = (state.tasksPage.items || []).find((task) => task.id === taskId);
+    state.taskLog = { id: taskId, name: item ? item.name : taskId, loading: true, text: null, error: null };
+    render();
+    try {
+        const data = await apiGet('getTaskLog', `id=${encodeURIComponent(taskId)}`);
+        state.taskLog = { id: taskId, name: item ? item.name : taskId, loading: false, text: data.log || null, error: null };
+    } catch (err) {
+        state.taskLog = { id: taskId, name: item ? item.name : taskId, loading: false, text: null, error: err.message };
+    }
+    render();
 }
 
 function applyTheme(theme) {
@@ -724,6 +1166,217 @@ async function deleteLastExchange() {
     }
 }
 
+/* ---------- Settings & tasks page builders ---------- */
+
+/** A page shell: sidebar + scrolling main column (no composer). */
+function buildPageHtml(titleText, innerHtml) {
+    return `<div class="page-scroll"><div class="page"><h1 class="page-title">${escapeHtml(titleText)}</h1>${innerHtml}</div></div>`;
+}
+
+function buildSettingsHtml() {
+    const form = state.settings;
+    if (form.loading) {
+        return buildPageHtml(STRINGS.settingsHeading, `<p class="page-status">${escapeHtml(STRINGS.loading)}</p>`);
+    }
+    if (form.error && !form.data) {
+        return buildPageHtml(STRINGS.settingsHeading,
+            `<div class="error-banner" role="alert">${escapeHtml(`${STRINGS.errorBannerPrefix}${form.error}`)}</div>` +
+            `<p class="page-status"><button type="button" class="btn" data-action="reloadSettings">${escapeHtml(STRINGS.retry)}</button></p>`);
+    }
+    const data = form.data;
+    const workspaceHtml =
+        `<section class="panel">` +
+        `<h2>${escapeHtml(STRINGS.settingsWorkspace)}</h2>` +
+        `<div class="form-row form-row-wide">` +
+        `<label class="form-field" for="workspace-input"><span>${escapeHtml(STRINGS.workspaceLabel)}</span>` +
+        `<input id="workspace-input" type="text" value="${escapeHtml(data.workspace)}" spellcheck="false"></label>` +
+        `<button type="button" class="btn btn-primary" data-action="saveWorkspace"${form.saving ? ' disabled' : ''}>` +
+        `${escapeHtml(STRINGS.workspaceSave)}</button>` +
+        `</div>` +
+        `<p class="form-hint">${escapeHtml(STRINGS.workspaceHint)}</p>` +
+        `</section>`;
+    const email = data.email || {};
+    const passwordField = email.hasPassword
+        ? `<input id="email-password" type="password" placeholder="${escapeHtml(STRINGS.emailPasswordSavedPlaceholder)}" autocomplete="new-password">`
+        : `<input id="email-password" type="password" autocomplete="new-password">`;
+    const gmailHtml =
+        `<section class="panel">` +
+        `<h2>${escapeHtml(STRINGS.settingsGmail)}</h2>` +
+        `<div class="form-grid">` +
+        `<label class="form-field" for="email-imap-host"><span>${escapeHtml(STRINGS.imapHostLabel)}</span>` +
+        `<input id="email-imap-host" type="text" value="${escapeHtml(email.imapHost || '')}" spellcheck="false" placeholder="imap.gmail.com"></label>` +
+        `<label class="form-field" for="email-imap-port"><span>${escapeHtml(STRINGS.imapPortLabel)}</span>` +
+        `<input id="email-imap-port" type="number" min="1" max="65535" value="${email.imapPort || 993}"></label>` +
+        `<label class="form-field" for="email-smtp-host"><span>${escapeHtml(STRINGS.smtpHostLabel)}</span>` +
+        `<input id="email-smtp-host" type="text" value="${escapeHtml(email.smtpHost || '')}" spellcheck="false" placeholder="smtp.gmail.com"></label>` +
+        `<label class="form-field" for="email-smtp-port"><span>${escapeHtml(STRINGS.smtpPortLabel)}</span>` +
+        `<input id="email-smtp-port" type="number" min="1" max="65535" value="${email.smtpPort || 465}"></label>` +
+        `<label class="form-field" for="email-user"><span>${escapeHtml(STRINGS.emailUserLabel)}</span>` +
+        `<input id="email-user" type="text" value="${escapeHtml(email.user || '')}" spellcheck="false"></label>` +
+        `<label class="form-field" for="email-password"><span>${escapeHtml(STRINGS.emailPasswordLabel)}</span>` +
+        passwordField + `</label>` +
+        `</div>` +
+        `<p class="form-hint">${escapeHtml(STRINGS.emailPasswordHint)} ${escapeHtml(STRINGS.emailPasswordSave)} ${escapeHtml(STRINGS.connectionHint)}</p>` +
+        `<div class="panel-actions">` +
+        `<button type="button" class="btn btn-primary" data-action="saveEmail"${form.savingEmail ? ' disabled' : ''}>` +
+        `${escapeHtml(STRINGS.settingsSaveEmail)}</button>` +
+        `<button type="button" class="btn" data-action="testConnection"${form.test && form.test.running ? ' disabled' : ''}>` +
+        `${escapeHtml(form.test && form.test.running ? STRINGS.testing : STRINGS.testConnection)}</button>` +
+        `</div>` +
+        (form.test && !form.test.running
+            ? `<div class="${form.test.ok ? 'status-ok' : 'status-err'}" role="status">${form.test.ok ? '✔' : '✖'} ${escapeHtml(form.test.message)}</div>`
+            : '') +
+        `</section>`;
+    let banners = '';
+    if (form.error) {
+        banners += `<div class="error-banner" role="alert">${escapeHtml(`${STRINGS.errorBannerPrefix}${form.error}`)}</div>`;
+    }
+    if (form.notice) {
+        banners += `<div class="notice-banner" role="status">${escapeHtml(form.notice)}</div>`;
+    }
+    return buildPageHtml(STRINGS.settingsHeading, banners + workspaceHtml + gmailHtml);
+}
+
+function buildTasksListHtml() {
+    const page = state.tasksPage;
+    if (page.loading) {
+        return `<p class="page-status">${escapeHtml(STRINGS.loading)}</p>`;
+    }
+    if (page.error) {
+        return `<div class="error-banner" role="alert">${escapeHtml(`${STRINGS.errorBannerPrefix}${page.error}`)}</div>` +
+            `<p class="page-status"><button type="button" class="btn" data-action="reloadTasks">${escapeHtml(STRINGS.retry)}</button></p>`;
+    }
+    const items = page.items || [];
+    if (!items.length) {
+        return `<p class="page-status">${escapeHtml(STRINGS.noTasks)}</p>`;
+    }
+    return items.map((item) => {
+        const enabled = item.enabled !== false;
+        return `<div class="task-item${enabled ? '' : ' task-disabled'}">` +
+            `<div class="task-main">` +
+            `<div class="task-title-row">` +
+            `<button type="button" class="task-toggle${enabled ? ' on' : ''}" data-action="task-toggle" data-id="${escapeHtml(item.id)}" ` +
+            `role="switch" aria-checked="${enabled}" title="${escapeHtml(STRINGS.taskEnabledLabel)}"></button>` +
+            `<strong class="task-name">${escapeHtml(item.name)}</strong>` +
+            `<span class="task-schedule">${escapeHtml(item.time || '')} · ${escapeHtml(taskDaysText(item.days))}</span>` +
+            `</div>` +
+            `<div class="task-meta">` +
+            `<span>${escapeHtml(item.model || '')}</span>` +
+            (item.lastRun ? `<span>· ${escapeHtml(STRINGS.taskLastRun)}: ${escapeHtml(item.lastRun)}</span>` : '') +
+            (item.lastError ? `<span class="status-err">· ✖ ${escapeHtml(item.lastError)}</span>` : '') +
+            `</div>` +
+            `<div class="task-tools">${(item.tools || []).map((tool) => `<span class="tool-tag">${escapeHtml(tool)}</span>`).join('')}</div>` +
+            `</div>` +
+            `<div class="task-actions">` +
+            `<button type="button" class="btn" data-action="task-run" data-id="${escapeHtml(item.id)}">${ICONS.play}${escapeHtml(STRINGS.taskRunNow)}</button>` +
+            `<button type="button" class="btn" data-action="task-log" data-id="${escapeHtml(item.id)}">${escapeHtml(STRINGS.taskLogTitle)}</button>` +
+            `<button type="button" class="icon-btn" data-action="task-edit" data-id="${escapeHtml(item.id)}" ` +
+            `title="${escapeHtml(STRINGS.taskEditTitle)}" aria-label="${escapeHtml(STRINGS.taskEditTitle)}">${ICONS.edit}</button>` +
+            `<button type="button" class="icon-btn" data-action="task-delete" data-id="${escapeHtml(item.id)}" ` +
+            `title="${escapeHtml(STRINGS.menuDelete)}" aria-label="${escapeHtml(STRINGS.menuDelete)}">${ICONS.trash}</button>` +
+            `</div>` +
+            `</div>`;
+    }).join('');
+}
+
+function buildTaskFormHtml() {
+    const form = state.taskForm;
+    if (!form) {
+        return '';
+    }
+    const dayButtons = STRINGS.dayNames.map((name, ix) => {
+        const day = ix + 1;
+        const on = form.days.has(day);
+        return `<button type="button" class="day-toggle${on ? ' on' : ''}" data-action="task-day" data-id="${day}" ` +
+            `aria-pressed="${on}" title="${escapeHtml(name)}">${escapeHtml(name)}</button>`;
+    }).join('');
+    const toolLabels = {
+        web_search: STRINGS.toolsTaskWebSearch,
+        fetch_page: STRINGS.toolsTaskFetchPage,
+        check_email: STRINGS.toolsTaskCheckEmail,
+        send_email: STRINGS.toolsTaskSendEmail
+    };
+    const toolChecks = TASK_FORM_TOOLS.map((tool) => {
+        const checked = form.tools.has(tool);
+        return `<label class="tool-check${checked ? ' on' : ''}">` +
+            `<input type="checkbox" data-tool="${escapeHtml(tool)}"${checked ? ' checked' : ''}>` +
+            `<span>${escapeHtml(toolLabels[tool] || tool)}</span></label>`;
+    }).join('');
+    const models = (state.models && state.models.list) || [];
+    const modelOptions = models.map((model) => {
+        const selected = model.id === form.model ? ' selected' : '';
+        return `<option value="${escapeHtml(model.id)}"${selected}>${escapeHtml(model.id)}</option>`;
+    }).join('');
+    const modelSelect = modelOptions
+        ? (form.model && !models.some((model) => model.id === form.model)
+            ? `<option value="${escapeHtml(form.model)}" selected>${escapeHtml(form.model)}</option>` + modelOptions
+            : modelOptions)
+        : (() => {
+              const fallback = form.model
+                  ? `<option value="${escapeHtml(form.model)}" selected>${escapeHtml(form.model)}</option>`
+                  : `<option value="">${escapeHtml(STRINGS.noModels)}</option>`;
+              return fallback;
+          })();
+    return `<div class="modal-overlay" id="modal-overlay">` +
+        `<div class="modal modal-wide" role="dialog" aria-modal="true" aria-label="${escapeHtml(form.id ? STRINGS.taskEditTitle : STRINGS.taskNewTitle)}">` +
+        `<h2>${escapeHtml(form.id ? STRINGS.taskEditTitle : STRINGS.taskNewTitle)}</h2>` +
+        (form.error ? `<p class="modal-error" role="alert">${escapeHtml(form.error)}</p>` : '') +
+        `<div class="form-grid">` +
+        `<label class="form-field" for="task-name"><span>${escapeHtml(STRINGS.taskNameLabel)}</span>` +
+        `<input id="task-name" type="text" value="${escapeHtml(form.name)}" maxlength="200"></label>` +
+        `<label class="form-field" for="task-time"><span>${escapeHtml(STRINGS.taskTimeLabel)}</span>` +
+        `<input id="task-time" type="time" value="${escapeHtml(form.time)}"></label>` +
+        `</div>` +
+        `<div class="form-field"><span>${escapeHtml(STRINGS.taskDaysLabel)}</span><div class="day-toggles">${dayButtons}</div></div>` +
+        `<label class="form-field form-row-wide" for="task-prompt"><span>${escapeHtml(STRINGS.taskPromptLabel)}</span>` +
+        `<textarea id="task-prompt" rows="4">${escapeHtml(form.prompt)}</textarea></label>` +
+        `<div class="form-grid">` +
+        `<label class="form-field" for="task-model"><span>${escapeHtml(STRINGS.taskModelLabel)}</span>` +
+        `<select id="task-model">${modelSelect}</select></label>` +
+        `<label class="form-field" for="task-numctx"><span>${escapeHtml(STRINGS.taskNumCtxLabel)}</span>` +
+        `<input id="task-numctx" type="number" min="128" step="128" value="${escapeHtml(form.numCtx)}" placeholder="default">` +
+        `<span class="form-hint">${escapeHtml(STRINGS.taskNumCtxHint)}</span></label>` +
+        `</div>` +
+        `<div class="form-field"><span>${escapeHtml(STRINGS.taskToolsLabel)}</span><div class="tools-list">${toolChecks}</div>` +
+        `<span class="form-hint">${escapeHtml(STRINGS.toolsTaskSendEmail)} - ${escapeHtml(STRINGS.sendEmailDefaultOff)}</span></div>` +
+        `<label class="check-row"><input type="checkbox" id="task-enabled"${form.enabled ? ' checked' : ''}>` +
+        `<span>${escapeHtml(STRINGS.taskEnabledLabel)}</span></label>` +
+        `<div class="modal-actions">` +
+        `<button type="button" class="btn" data-action="task-form-cancel">${escapeHtml(STRINGS.cancel)}</button>` +
+        `<button type="button" class="btn btn-primary" data-action="task-form-save"${form.saving ? ' disabled' : ''}>` +
+        `${escapeHtml(STRINGS.taskSaveLabel)}</button>` +
+        `</div></div></div>`;
+}
+
+function buildTaskLogHtml() {
+    const log = state.taskLog;
+    if (!log) {
+        return '';
+    }
+    return `<div class="modal-overlay" id="modal-overlay">` +
+        `<div class="modal modal-wide" role="dialog" aria-modal="true" aria-label="${escapeHtml(STRINGS.taskLogTitle)}">` +
+        `<h2>${escapeHtml(log.name)}</h2>` +
+        (log.loading
+            ? `<p class="page-status">${escapeHtml(STRINGS.loading)}</p>`
+            : log.error
+                ? `<div class="error-banner" role="alert">${escapeHtml(`${STRINGS.errorBannerPrefix}${log.error}`)}</div>`
+                : log.text
+                    ? `<pre class="task-log">${escapeHtml(log.text)}</pre>`
+                    : `<p class="page-status">${escapeHtml(STRINGS.noTaskLog)}</p>`) +
+        `<div class="modal-actions">` +
+        `<button type="button" class="btn" data-action="task-log-close">${escapeHtml(STRINGS.close)}</button>` +
+        `</div></div></div>`;
+}
+
+function buildTasksHtml() {
+    const header =
+        `<div class="panel-actions tasks-header">` +
+        `<button type="button" class="btn btn-primary" data-action="task-new">${escapeHtml(STRINGS.newTask)}</button>` +
+        `</div>`;
+    const inner = header + `<div id="tasks-list">${buildTasksListHtml()}</div>`;
+    return buildPageHtml(STRINGS.tasksHeading, inner);
+}
+
 function buildMdViewerHtml() {
     const viewer = state.mdViewer;
     if (!viewer) return '';
@@ -892,11 +1545,13 @@ function renderModal() {
             `<button type="button" class="btn btn-primary" data-action="modal-save">${escapeHtml(STRINGS.save)}</button>` +
             `</div></div></div>`;
     }
+    const delTitle = modal.type === 'delete-task' ? STRINGS.deleteTaskTitle : STRINGS.deleteTitle;
+    const delConfirm = modal.type === 'delete-task' ? STRINGS.deleteTaskConfirm : STRINGS.deleteConfirm;
     return `<div class="modal-overlay" id="modal-overlay">` +
-        `<div class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(STRINGS.deleteTitle)}">` +
-        `<h2>${escapeHtml(STRINGS.deleteTitle)}</h2>` +
+        `<div class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(delTitle)}">` +
+        `<h2>${escapeHtml(delTitle)}</h2>` +
         (modal.error ? `<p class="modal-error" role="alert">${escapeHtml(modal.error)}</p>` : '') +
-        `<p>${escapeHtml(STRINGS.deleteConfirm)}</p>` +
+        `<p>${escapeHtml(delConfirm)}</p>` +
         `<p class="modal-target">“${escapeHtml(modal.title)}”</p>` +
         `<div class="modal-actions">` +
         `<button type="button" class="btn" data-action="modal-cancel">${escapeHtml(STRINGS.cancel)}</button>` +
@@ -906,39 +1561,37 @@ function renderModal() {
 
 function render() {
     const theme = currentTheme();
-    if (state.route.name === 'chat') {
-        document.title = `${chatTitle(state.route.id)} - ${STRINGS.appTitle}`;
-    } else {
-        document.title = STRINGS.appTitle;
-    }
+    const pageName = state.route.name === 'settings' ? STRINGS.settingsHeading
+        : state.route.name === 'tasks' ? STRINGS.tasksHeading
+        : state.route.name === 'chat' ? chatTitle(state.route.id)
+        : STRINGS.appTitle;
+    document.title = state.route.name === 'new' ? STRINGS.appTitle : `${pageName} - ${STRINGS.appTitle}`;
+
+    // The settings/tasks pages show a scrolling page instead of the chat area (no composer)
+    const page = state.route.name === 'settings' ? buildSettingsHtml()
+        : state.route.name === 'tasks' ? buildTasksHtml()
+        : null;
+    const main = page !== null
+        ? page
+        : ((state.sidebarCollapsed ? `<button class="icon-btn sidebar-fab" id="btn-sidebar-fab" title="${escapeHtml(STRINGS.openSidebar)}" aria-label="${escapeHtml(STRINGS.openSidebar)}">${ICONS.panel}</button>` : '') +
+            buildChatHeaderHtml() +
+            `<div class="messages"><div class="messages-inner" id="messages">${buildMessagesHtml()}</div></div>` +
+            `<div class="composer-wrap"><div class="composer">${buildComposerHtml()}</div></div>`);
 
     root.innerHTML =
         `<div class="layout${state.sidebarCollapsed ? ' sidebar-collapsed' : ''}" id="layout">` +
-        `<aside class="sidebar" aria-label="${escapeHtml(STRINGS.chatsHeading)}">` +
-        `<div class="sidebar-toolbar">` +
-        `<button class="icon-btn" id="btn-sidebar" title="${escapeHtml(STRINGS.sidebarToggle)}" aria-label="${escapeHtml(STRINGS.sidebarToggle)}">${ICONS.panel}</button>` +
-        `<button class="icon-btn" id="btn-theme" title="${escapeHtml(STRINGS.themeToggle)}" aria-label="${escapeHtml(STRINGS.themeToggle)}">${theme === 'dark' ? ICONS.sun : ICONS.moon}</button>` +
-        `<button class="icon-btn" id="btn-md" title="${escapeHtml(STRINGS.openMd)}" aria-label="${escapeHtml(STRINGS.openMd)}">${ICONS.md}</button>` +
-        `</div>` +
-        `<nav class="nav-list">` +
-        `<a class="nav-item${state.route.name === 'new' ? ' active' : ''}" href="#/">${ICONS.newChat}<span>${escapeHtml(STRINGS.navChat)}</span></a>` +
-        `</nav>` +
-        `<p class="chat-list-title">${escapeHtml(STRINGS.chatsHeading)}</p>` +
-        `<div class="chat-list" id="chat-list">${buildSidebarListHtml()}</div>` +
-        `</aside>` +
+        buildSidebarHtml(theme) +
         `<main class="main">` +
         `<header class="topbar">` +
         `<button class="icon-btn" id="btn-sidebar-open" title="${escapeHtml(STRINGS.openSidebar)}" aria-label="${escapeHtml(STRINGS.openSidebar)}">${ICONS.panel}</button>` +
         `<span class="topbar-title">${escapeHtml(STRINGS.appTitle)}</span>` +
         `</header>` +
-        (state.sidebarCollapsed ? `<button class="icon-btn sidebar-fab" id="btn-sidebar-fab" title="${escapeHtml(STRINGS.openSidebar)}" aria-label="${escapeHtml(STRINGS.openSidebar)}">${ICONS.panel}</button>` : '') +
-        buildChatHeaderHtml() +
-        `<div class="messages"><div class="messages-inner" id="messages">${buildMessagesHtml()}</div></div>` +
-        `<div class="composer-wrap"><div class="composer">${buildComposerHtml()}</div></div>` +
+        main +
         `</main>` +
         `</div>` +
         (state.openMenuId || state.modelMenuOpen ? `<div class="overlay" id="menu-overlay"></div>` : '') +
         renderModal() +
+        renderModalTask() +
         `<input type="file" id="md-file-input" accept=".md,.markdown,text/markdown" style="display:none">`;
 
     autoresizeComposer();
@@ -955,6 +1608,38 @@ function render() {
             composer.setSelectionRange(composer.value.length, composer.value.length);
         }
     }
+}
+
+/** The left sidebar: app nav, workspace name and the Settings/Tasks links. */
+function buildSidebarHtml(theme) {
+    const work = workspaceName();
+    const routeName = state.route.name;
+    return `<aside class="sidebar" aria-label="${escapeHtml(STRINGS.chatsHeading)}">` +
+        `<div class="sidebar-toolbar">` +
+        `<button class="icon-btn" id="btn-sidebar" title="${escapeHtml(STRINGS.sidebarToggle)}" aria-label="${escapeHtml(STRINGS.sidebarToggle)}">${ICONS.panel}</button>` +
+        `<button class="icon-btn" id="btn-theme" title="${escapeHtml(STRINGS.themeToggle)}" aria-label="${escapeHtml(STRINGS.themeToggle)}">${theme === 'dark' ? ICONS.sun : ICONS.moon}</button>` +
+        `<button class="icon-btn" id="btn-md" title="${escapeHtml(STRINGS.openMd)}" aria-label="${escapeHtml(STRINGS.openMd)}">${ICONS.md}</button>` +
+        `</div>` +
+        `<nav class="nav-list">` +
+        `<a class="nav-item${routeName === 'new' ? ' active' : ''}" href="#/">${ICONS.newChat}<span>${escapeHtml(STRINGS.navChat)}</span></a>` +
+        `<a class="nav-item${routeName === 'settings' ? ' active' : ''}" href="#/settings">${ICONS.gear}<span>${escapeHtml(STRINGS.navSettings)}</span></a>` +
+        `<a class="nav-item${routeName === 'tasks' ? ' active' : ''}" href="#/tasks">${ICONS.checklist}<span>${escapeHtml(STRINGS.navTasks)}</span></a>` +
+        `</nav>` +
+        (work ? `<p class="workspace-label" title="${escapeHtml(state.workspace)}">${ICONS.folder}<span>${escapeHtml(work)}</span></p>` : '') +
+        `<p class="chat-list-title">${escapeHtml(STRINGS.chatsHeading)}</p>` +
+        `<div class="chat-list" id="chat-list">${buildSidebarListHtml()}</div>` +
+        `</aside>`;
+}
+
+/** The task form and task log modals (rendered next to the shared modal). */
+function renderModalTask() {
+    if (state.taskLog) {
+        return buildTaskLogHtml();
+    }
+    if (state.taskForm) {
+        return buildTaskFormHtml();
+    }
+    return '';
 }
 
 function autoresizeComposer() {
@@ -1183,6 +1868,9 @@ async function refreshConversations() {
     try {
         const data = await apiGet('getConversations');
         state.conversations = data.conversations || [];
+        if (data.workspace) {
+            state.workspace = data.workspace;
+        }
         if (!state.selectedModel && data.model) {
             state.selectedModel = data.model;
         }
@@ -1195,6 +1883,7 @@ async function refreshConversations() {
 
 function onHashChange() {
     stopPolling();
+    stopTasksPolling();
     state.route = parseRoute();
     state.openMenuId = null;
     state.modal = null;
@@ -1203,12 +1892,18 @@ function onHashChange() {
     state.current = null;
     state.sending = false;
     state.notice = null;
+    state.taskForm = null;
+    state.taskLog = null;
     state.thinkingOpen = {};
     state.toolsOpen = {};
     document.getElementById('layout')?.classList.remove('sidebar-open');
     render();
     if (state.route.name === 'chat') {
         loadConversation(state.route.id);
+    } else if (state.route.name === 'settings') {
+        loadSettings();
+    } else if (state.route.name === 'tasks') {
+        loadTasksPage();
     }
 }
 
@@ -1230,7 +1925,44 @@ function onRootClick(event) {
         } else if (action === 'modal-save') {
             submitRename();
         } else if (action === 'modal-confirm') {
-            submitDelete();
+            if (state.modal.type === 'delete-task') {
+                submitTaskDelete();
+            } else {
+                submitDelete();
+            }
+        } else if (action === 'reloadSettings') {
+            loadSettings();
+        } else if (action === 'saveWorkspace') {
+            submitWorkspace();
+        } else if (action === 'saveEmail') {
+            submitEmailSettings();
+        } else if (action === 'testConnection') {
+            testConnection();
+        } else if (action === 'reloadTasks') {
+            loadTasksPage();
+        } else if (action === 'task-new') {
+            openTaskForm(null);
+        } else if (action === 'task-edit') {
+            openTaskForm((state.tasksPage.items || []).find((task) => task.id === id) || null);
+        } else if (action === 'task-delete') {
+            openTaskDelete(id);
+        } else if (action === 'task-run') {
+            runTaskNow(id);
+        } else if (action === 'task-log') {
+            openTaskLog(id);
+        } else if (action === 'task-toggle') {
+            toggleTask(id);
+        } else if (action === 'task-day') {
+            const day = Number(id);
+            setTaskFormField('day', day, !state.taskForm.days.has(day));
+        } else if (action === 'task-form-save') {
+            submitTaskForm();
+        } else if (action === 'task-form-cancel') {
+            state.taskForm = null;
+            render();
+        } else if (action === 'task-log-close') {
+            state.taskLog = null;
+            render();
         } else if (action === 'retry' && state.route.name === 'chat') {
             loadConversation(state.route.id);
         } else if (action === 'send') {
@@ -1292,6 +2024,8 @@ function onRootClick(event) {
     }
     if (event.target.id === 'modal-overlay') {
         state.modal = null;
+        state.taskForm = null;
+        state.taskLog = null;
         render();
         return;
     }
@@ -1344,6 +2078,17 @@ function onRootKeyDown(event) {
     } else if (event.key === 'Enter' && event.target && event.target.id === 'composer-input' && !event.shiftKey) {
         event.preventDefault();
         submitComposer();
+    } else if (event.key === 'Enter' && event.target && event.target.id === 'workspace-input') {
+        event.preventDefault();
+        submitWorkspace();
+    } else if (event.key === 'Enter' && event.target && (event.target.id === 'task-name' || event.target.id === 'task-time' || event.target.id === 'task-numctx')) {
+        // Enter inside a task form field - move the focus to the next field instead of submitting
+        const focusables = Array.from(document.querySelectorAll('.modal .form-field input, .modal .form-field textarea'));
+        const ix = focusables.indexOf(event.target);
+        if (ix >= 0 && ix + 1 < focusables.length) {
+            event.preventDefault();
+            focusables[ix + 1].focus();
+        }
     }
 }
 
@@ -1371,6 +2116,12 @@ function onKeyDown(event) {
     if (event.key === 'Escape') {
         if (state.modal) {
             state.modal = null;
+            render();
+        } else if (state.taskForm) {
+            state.taskForm = null;
+            render();
+        } else if (state.taskLog) {
+            state.taskLog = null;
             render();
         } else if (state.mdViewer) {
             state.mdViewer = null;
@@ -1425,6 +2176,14 @@ async function init() {
             } else {
                 event.target.value = '';
             }
+        } else if (event.target.matches && event.target.matches('input[data-tool]')) {
+            setTaskFormField('tool', event.target.dataset.tool, event.target.checked);
+        } else if (event.target.id === 'task-enabled') {
+            setTaskFormField('enabled', event.target.checked);
+        } else if (event.target.id === 'task-model') {
+            if (state.taskForm) {
+                state.taskForm.model = event.target.value;
+            }
         }
     });
     render();
@@ -1436,6 +2195,10 @@ async function init() {
     await refreshConversations();
     if (state.route.name === 'chat') {
         loadConversation(state.route.id);
+    } else if (state.route.name === 'settings') {
+        loadSettings();
+    } else if (state.route.name === 'tasks') {
+        loadTasksPage();
     } else {
         render();
     }

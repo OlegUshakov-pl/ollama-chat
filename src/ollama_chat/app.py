@@ -24,14 +24,18 @@ import urllib3
 import schema_markdown
 
 from .chat import ChatManager, config_conversation, config_template_prompts
-from .email_tools import send_email as smtp_send_email
+from .email_tools import (
+    get_email_settings, save_email_settings, send_email as smtp_send_email, test_email_connection
+)
 from .memory import (
     MEMORY_BACKUP_SUFFIX, MEMORY_FILENAME, USER_MEMORY_FILENAME, daily_file_path, ensure_workspace,
     memory_file_path, workspace_dir
 )
 from .ollama import ollama_delete, ollama_list, ollama_pull
 from .pdf import conversation_markdown, write_pdf_file
-from .tasks import TaskManager, load_tasks
+from .tasks import (
+    TaskManager, load_tasks, parse_task_time, task_enabled, task_log_text, task_remove, task_upsert
+)
 
 
 # The ollama-chat back-end API WSGI application class
@@ -57,26 +61,34 @@ class OllamaChat(chisel.Application):
         self.add_request(delete_conversation)
         self.add_request(delete_conversation_exchange)
         self.add_request(delete_model)
+        self.add_request(delete_task)
         self.add_request(delete_template)
         self.add_request(download_model)
         self.add_request(export_pdf)
         self.add_request(get_conversation)
         self.add_request(get_conversations)
         self.add_request(get_models)
+        self.add_request(get_settings)
         self.add_request(get_system_info)
+        self.add_request(get_task_log)
+        self.add_request(get_tasks)
         self.add_request(get_template)
         self.add_request(move_conversation)
         self.add_request(move_template)
         self.add_request(regenerate_conversation_exchange)
         self.add_request(reply_conversation)
+        self.add_request(run_task)
         self.add_request(send_email_request)
         self.add_request(set_conversation_title)
+        self.add_request(set_email_settings)
         self.add_request(set_model)
+        self.add_request(set_task)
         self.add_request(set_workspace)
         self.add_request(start_conversation)
         self.add_request(start_template)
         self.add_request(stop_conversation)
         self.add_request(stop_model_download)
+        self.add_request(test_email_connection_request)
         self.add_request(update_template)
 
         # Front-end statics
@@ -229,9 +241,7 @@ def get_conversations(ctx, unused_req):
                     'name': task.get('name', ''),
                     'time': task.get('time', ''),
                     'days': task.get('days') or [],
-                    'model': task.get('model', ''),
-                    'lastRun': task.get('lastRun'),
-                    'lastError': task.get('lastError')
+                    'model': task.get('model', '')
                 }
                 for task in load_tasks(workspace_dir(config))
             ]
@@ -260,6 +270,146 @@ def set_workspace(ctx, req):
     with ctx.app.config(save=True) as config:
         config['workspace'] = str(workspace.resolve())
         return {'workspace': str(workspace_dir(config))}
+
+
+# Get the workspace and email settings - the app password is never included
+@chisel.action(name='getSettings', types=OLLAMA_CHAT_TYPES)
+def get_settings(ctx, unused_req):
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+        return {
+            'workspace': workspace,
+            'email': get_email_settings(workspace)
+        }
+
+
+# Save the email settings to the workspace's .env file. The app password is write-only - an
+# empty "password" keeps the saved password, and the password is never sent to the browser.
+@chisel.action(name='setEmailSettings', types=OLLAMA_CHAT_TYPES)
+def set_email_settings(ctx, req):
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+    try:
+        save_email_settings( \
+            workspace, \
+            req['imapHost'], \
+            req.get('imapPort', 993), \
+            req['smtpHost'], \
+            req.get('smtpPort', 465), \
+            req['user'], \
+            password=req.get('password') or None
+        )
+    except OSError as exc:
+        raise chisel.ActionError('BadEmailSettings', f'Failed to save the email settings ({exc})') from None
+    return {'saved': True}
+
+
+# Check the email settings - log in to the configured IMAP and SMTP servers, sending nothing
+@chisel.action(name='testEmailConnection', types=OLLAMA_CHAT_TYPES)
+def test_email_connection_request(ctx, unused_req):
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+    try:
+        message = test_email_connection(workspace)
+    except ValueError as exc:
+        raise chisel.ActionError('TestFailed', str(exc)) from None
+    return {'message': message}
+
+
+# Get the tasks' full info, for the tasks page
+@chisel.action(name='getTasks', types=OLLAMA_CHAT_TYPES)
+def get_tasks(ctx, unused_req):
+    with ctx.app.config() as config:
+        tasks = load_tasks(workspace_dir(config))
+    return {'tasks': [_task_details(task) for task in tasks]}
+
+
+# A task dict's full info response
+def _task_details(task):
+    details = {
+        'id': task.get('id', ''),
+        'name': task.get('name', ''),
+        'time': task.get('time', ''),
+        'days': task.get('days') or [],
+        'model': task.get('model', ''),
+        'prompt': str(task.get('prompt') or ''),
+        'tools': task.get('tools') or [],
+        'enabled': task_enabled(task)
+    }
+    if task.get('lastRun'):
+        details['lastRun'] = task['lastRun']
+    if task.get('lastError'):
+        details['lastError'] = task['lastError']
+    if task.get('num_ctx'):
+        details['numCtx'] = task['num_ctx']
+    return details
+
+
+# Create a scheduled task, or update the task's fields when "id" is present
+@chisel.action(name='setTask', types=OLLAMA_CHAT_TYPES)
+def set_task(ctx, req):
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+    days = req['days']
+    if not days or not all(isinstance(day, int) and 1 <= day <= 7 for day in days):
+        raise chisel.ActionError('BadTask', 'the task days must be ISO weekdays 1-7')
+    try:
+        task = task_upsert( \
+            workspace, \
+            req.get('id'), \
+            req['name'], \
+            parse_task_time(req['time']), \
+            sorted(set(days)), \
+            req['prompt'], \
+            req['model'], \
+            num_ctx=req.get('numCtx'), \
+            tools=req['tools'], \
+            enabled=req.get('enabled', True)
+        )
+    except ValueError as exc:
+        raise chisel.ActionError('BadTask', str(exc)) from None
+
+    # Start the scheduler thread when not already running (it starts lazily)
+    ctx.app.tasks.start()
+    return {'id': task['id']}
+
+
+# Delete a scheduled task
+@chisel.action(name='deleteTask', types=OLLAMA_CHAT_TYPES)
+def delete_task(ctx, req):
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+    try:
+        task_remove(workspace, req['id'])
+    except ValueError as exc:
+        raise chisel.ActionError('UnknownTaskID', str(exc)) from None
+
+
+# Run a scheduled task now, in a background thread. Poll getTasks for the task's lastRun.
+@chisel.action(name='runTask', types=OLLAMA_CHAT_TYPES)
+def run_task(ctx, req):
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+    task_id = req['id']
+    if not any(task.get('id') == task_id for task in load_tasks(workspace)):
+        raise chisel.ActionError('UnknownTaskID', f'No task "{task_id}"')
+    threading.Thread(target=ctx.app.tasks.run_task_by_id, args=(task_id,), daemon=True).start()
+    return {'started': True}
+
+
+# Get a scheduled task's run log, from the workspace's logs directory
+@chisel.action(name='getTaskLog', types=OLLAMA_CHAT_TYPES)
+def get_task_log(ctx, req):
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+    task_id = req['id']
+    if not any(task.get('id') == task_id for task in load_tasks(workspace)):
+        raise chisel.ActionError('UnknownTaskID', f'No task "{task_id}"')
+    response = {}
+    log = task_log_text(workspace, task_id)
+    if log:
+        response['log'] = log
+    return response
 
 
 @chisel.action(name='moveConversation', types=OLLAMA_CHAT_TYPES)

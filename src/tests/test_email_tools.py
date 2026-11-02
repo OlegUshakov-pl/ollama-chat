@@ -12,7 +12,9 @@ import smtplib
 import unittest
 from unittest import mock
 
-from ollama_chat.email_tools import _load_env, check_email, send_email
+from ollama_chat.email_tools import (
+    _load_env, check_email, get_email_settings, save_email_settings, send_email, test_email_connection
+)
 
 from .util import create_test_files
 
@@ -414,3 +416,88 @@ class TestSendEmail(unittest.TestCase):
 
 
 __all__ = ['TestLoadEnv', 'TestCheckEmail', 'TestSendEmail']
+
+
+class TestEmailSettings(unittest.TestCase):
+
+    def test_get_email_settings(self):
+        with create_test_files([('.env', _ENV_CONTENT)]) as temp_dir:
+            settings = get_email_settings(temp_dir)
+            self.assertEqual(settings['imapHost'], 'imap.example.com')
+            self.assertEqual(settings['imapPort'], 993)
+            self.assertEqual(settings['smtpHost'], 'smtp.example.com')
+            self.assertEqual(settings['smtpPort'], 465)
+            self.assertEqual(settings['user'], 'boss@example.com')
+            self.assertTrue(settings['hasPassword'])
+
+            # The password itself must never appear in the settings summary
+            self.assertNotIn('secret', json.dumps(settings))
+
+
+    def test_get_email_settings_empty(self):
+        with create_test_files([]) as temp_dir:
+            settings = get_email_settings(temp_dir)
+            self.assertEqual(settings['imapHost'], '')
+            self.assertEqual(settings['imapPort'], 993)  # default port
+            self.assertEqual(settings['smtpPort'], 465)  # default port
+            self.assertEqual(settings['user'], '')
+            self.assertFalse(settings['hasPassword'])
+
+
+    def test_save_email_settings(self, ):
+        with create_test_files([]) as temp_dir:
+            save_email_settings(temp_dir, 'imap.gmail.com', 993, 'smtp.gmail.com', 465, 'me@example.com', password='app-password')
+            env = _load_env(temp_dir)
+            self.assertEqual(env['EMAIL_IMAP_HOST'], 'imap.gmail.com')
+            self.assertEqual(env['EMAIL_IMAP_PORT'], '993')
+            self.assertEqual(env['EMAIL_SMTP_HOST'], 'smtp.gmail.com')
+            self.assertEqual(env['EMAIL_SMTP_PORT'], '465')
+            self.assertEqual(env['EMAIL_USER'], 'me@example.com')
+            self.assertEqual(env['EMAIL_PASSWORD'], 'app-password')
+
+            # Defaults keep the ports and the unknown keys (like EMAIL_FROM) are preserved
+            save_email_settings(temp_dir, 'imap.gmail.com', '', 'smtp.gmail.com', None, 'me@example.com')
+            env = _load_env(temp_dir)
+            self.assertEqual(env['EMAIL_IMAP_PORT'], '993')
+            self.assertEqual(env['EMAIL_SMTP_PORT'], '465')
+
+            # An empty password keeps the saved password
+            save_email_settings(temp_dir, 'imap.gmail.com', 993, 'smtp.gmail.com', 465, 'me@example.com')
+            env = _load_env(temp_dir)
+            self.assertEqual(env['EMAIL_PASSWORD'], 'app-password')
+
+
+    def test_test_email_connection(self):
+        with create_test_files([('.env', _ENV_CONTENT)]) as temp_dir:
+            _FakeSMTP.instances = []
+            imap = _FakeIMAP()
+            with mock.patch('ollama_chat.email_tools.imaplib.IMAP4_SSL', return_value=imap), \
+                 mock.patch('ollama_chat.email_tools.smtplib.SMTP_SSL', _FakeSMTP):
+                message = test_email_connection(temp_dir)
+            self.assertEqual(message, 'IMAP: logged in to imap.example.com:993; SMTP: logged in to smtp.example.com:465')
+            self.assertTrue(imap.logged_out)
+            smtp = _FakeSMTP.instances[-1]
+            self.assertEqual(smtp.host, 'smtp.example.com')
+            self.assertEqual(smtp.login_user, 'boss@example.com')
+
+
+    def test_test_email_connection_failure(self):
+        with create_test_files([('.env', _ENV_CONTENT)]) as temp_dir:
+            _FakeIMAP.login_error = imaplib.IMAP4.error('Bad credentials')
+            try:
+                imap = _FakeIMAP()
+                with mock.patch('ollama_chat.email_tools.imaplib.IMAP4_SSL', return_value=imap), \
+                     mock.patch('ollama_chat.email_tools.smtplib.SMTP_SSL', side_effect=OSError('refused')):
+                    with self.assertRaises(ValueError) as caught:
+                        test_email_connection(temp_dir)
+                self.assertIn('IMAP: ', str(caught.exception))
+                self.assertIn('SMTP: ', str(caught.exception))
+            finally:
+                _FakeIMAP.login_error = None
+
+
+    def test_test_email_connection_missing_config(self):
+        with create_test_files([]) as temp_dir:
+            with self.assertRaises(ValueError) as caught:
+                test_email_connection(temp_dir)
+            self.assertIn('Email is not configured', str(caught.exception))

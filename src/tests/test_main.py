@@ -58,7 +58,7 @@ class TestMain(unittest.TestCase):
             serve_args, serve_kwargs = mock_serve.call_args
             application_wrap = serve_args[0]
             self.assertTrue(callable(application_wrap))
-            self.assertDictEqual(serve_kwargs, {'port': 8080})
+            self.assertDictEqual(serve_kwargs, {'host': '127.0.0.1', 'port': 8080})
 
             start_response_calls = []
             def start_response(status, response_headers):
@@ -105,7 +105,7 @@ ollama-chat: 200 GET /getConversations\x20
             serve_args, serve_kwargs = mock_serve.call_args
             application_wrap = serve_args[0]
             self.assertTrue(callable(application_wrap))
-            self.assertDictEqual(serve_kwargs, {'port': 8080})
+            self.assertDictEqual(serve_kwargs, {'host': '127.0.0.1', 'port': 8080})
 
             start_response_calls = []
             def start_response(status, response_headers):
@@ -150,7 +150,7 @@ ollama-chat: 200 GET /getConversations\x20
             serve_args, serve_kwargs = mock_serve.call_args
             application_wrap = serve_args[0]
             self.assertTrue(callable(application_wrap))
-            self.assertDictEqual(serve_kwargs, {'port': 8080})
+            self.assertDictEqual(serve_kwargs, {'host': '127.0.0.1', 'port': 8080})
 
             start_response_calls = []
             def start_response(status, response_headers):
@@ -194,7 +194,7 @@ ollama-chat: 200 GET /getConversations\x20
             serve_args, serve_kwargs = mock_serve.call_args
             application_wrap = serve_args[0]
             self.assertTrue(callable(application_wrap))
-            self.assertDictEqual(serve_kwargs, {'port': 8080})
+            self.assertDictEqual(serve_kwargs, {'host': '127.0.0.1', 'port': 8080})
 
             start_response_calls = []
             def start_response(status, response_headers):
@@ -239,7 +239,7 @@ ollama-chat: 200 GET /getConversations\x20
             serve_args, serve_kwargs = mock_serve.call_args
             application_wrap = serve_args[0]
             self.assertTrue(callable(application_wrap))
-            self.assertDictEqual(serve_kwargs, {'port': 8080})
+            self.assertDictEqual(serve_kwargs, {'host': '127.0.0.1', 'port': 8080})
 
             start_response_calls = []
             def start_response(status, response_headers):
@@ -281,7 +281,7 @@ ollama-chat: 200 GET /getConversations\x20
             serve_args, serve_kwargs = mock_serve.call_args
             application_wrap = serve_args[0]
             self.assertTrue(callable(application_wrap))
-            self.assertDictEqual(serve_kwargs, {'port': 8080})
+            self.assertDictEqual(serve_kwargs, {'host': '127.0.0.1', 'port': 8080})
 
             start_response_calls = []
             def start_response(status, response_headers):
@@ -332,7 +332,7 @@ ollama-chat: 200 GET /getConversations\x20
             mock_serve.assert_called_once()
             serve_args, serve_kwargs = mock_serve.call_args
             self.assertTrue(callable(serve_args[0]))
-            self.assertDictEqual(serve_kwargs, {'port': 8080})
+            self.assertDictEqual(serve_kwargs, {'host': '127.0.0.1', 'port': 8080})
 
             self.assertEqual(stdout.getvalue(), 'ollama-chat: Serving at http://127.0.0.1:8080/ ...\n')
             self.assertEqual(stderr.getvalue(), '')
