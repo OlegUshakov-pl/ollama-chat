@@ -28,8 +28,9 @@ from .email_tools import (
     get_email_settings, save_email_settings, send_email as smtp_send_email, test_email_connection
 )
 from .memory import (
-    MEMORY_BACKUP_SUFFIX, MEMORY_FILENAME, USER_MEMORY_FILENAME, daily_file_path, ensure_workspace,
-    memory_file_path, workspace_dir
+    MEMORY_BACKUP_SUFFIX, MEMORY_FILENAME, PROFILE_LIMIT_DEFAULT, USER_MEMORY_FILENAME,
+    daily_file_path, ensure_workspace, memory_file_path, read_memory_file, workspace_dir,
+    write_memory_file
 )
 from .ollama import ollama_delete, ollama_list, ollama_pull
 from .pdf import conversation_markdown, write_pdf_file
@@ -68,6 +69,7 @@ class OllamaChat(chisel.Application):
         self.add_request(get_conversation)
         self.add_request(get_conversations)
         self.add_request(get_models)
+        self.add_request(get_profile)
         self.add_request(get_settings)
         self.add_request(get_system_info)
         self.add_request(get_task_log)
@@ -82,6 +84,7 @@ class OllamaChat(chisel.Application):
         self.add_request(set_conversation_title)
         self.add_request(set_email_settings)
         self.add_request(set_model)
+        self.add_request(set_profile)
         self.add_request(set_task)
         self.add_request(set_workspace)
         self.add_request(start_conversation)
@@ -314,6 +317,34 @@ def test_email_connection_request(ctx, unused_req):
     except ValueError as exc:
         raise chisel.ActionError('TestFailed', str(exc)) from None
     return {'message': message}
+
+
+# Get the user profile - the USER.md content and the profile character limit
+@chisel.action(name='getProfile', types=OLLAMA_CHAT_TYPES)
+def get_profile(ctx, unused_req):
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+        limit = config.get('profileLimit', PROFILE_LIMIT_DEFAULT)
+    return {'content': read_memory_file(workspace, USER_MEMORY_FILENAME), 'limit': limit}
+
+
+# Save the user profile (memory/USER.md). The content is limited to profileLimit characters.
+@chisel.action(name='setProfile', types=OLLAMA_CHAT_TYPES)
+def set_profile(ctx, req):
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+        limit = config.get('profileLimit', PROFILE_LIMIT_DEFAULT)
+    content = req['content']
+    if len(content) > limit:
+        raise chisel.ActionError( \
+            'ProfileTooLong', \
+            f'The profile is too long - {len(content)} characters (the limit is {limit})'
+        )
+    try:
+        write_memory_file(workspace, USER_MEMORY_FILENAME, content)
+    except (OSError, ValueError) as exc:
+        raise chisel.ActionError('BadProfile', f'Failed to save the profile ({exc})') from None
+    return {'saved': True}
 
 
 # Get the tasks' full info, for the tasks page

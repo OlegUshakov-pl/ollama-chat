@@ -132,6 +132,16 @@ struct SettingsInfo
     optional string lastError
 
 
+# The user profile - the USER.md content and its character limit
+struct ProfileInfo
+
+    # The USER.md markdown content
+    string content
+
+    # The max USER.md content length - longer content is rejected by setProfile
+    int limit
+
+
 # The user-model conversation info with generating status
 struct ConversationInfoEx (ConversationInfo)
 
@@ -315,6 +325,9 @@ struct OllamaChatConfig
     # The workspace memory character limit (default is 3000)
     optional int memoryLimit
 
+    # The user profile (memory/USER.md) character limit (default is 1500)
+    optional int profileLimit
+
     # If true, run tasks missed within the last 24 hours at application start (default is true)
     optional bool tasksCatchUp
 
@@ -465,6 +478,33 @@ action testEmailConnection
 
     errors
         TestFailed
+
+
+# Get the user profile - the workspace memory file USER.md and its character limit. USER.md is
+# added to the system prompt of every chat message.
+action getProfile
+    urls
+        GET
+
+    output (ProfileInfo)
+
+
+# Save the user profile (memory/USER.md)
+action setProfile
+    urls
+        POST
+
+    input
+        # The USER.md markdown content
+        string content
+
+    output
+        # True, once USER.md is saved
+        bool saved
+
+    errors
+        ProfileTooLong
+        BadProfile
 
 
 # Get the scheduled tasks' full info (the tasks page's list)

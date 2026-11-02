@@ -19,7 +19,7 @@ from ollama_chat.chat import (
     _escape_markdown_text, _process_commands, _run_tool, _tool_call_arguments, _StreamTokenFilter,
     config_template_prompts, ChatManager
 )
-from ollama_chat.memory import memory_context
+from ollama_chat.memory import memory_context, time_context
 from ollama_chat.tasks import load_tasks
 from ollama_chat.web_tools import WEB_TOOLS
 
@@ -240,7 +240,7 @@ class TestChatManager(unittest.TestCase):
             # Run the thread function
             ChatManager.chat_thread_fn(chat_manager)
 
-            # Verify the ollama.chat calls - the memory context is injected as the system message
+            # Verify the ollama.chat calls - the memory and date/time contexts are injected
             self.assertEqual(mock_pool_manager_instance.request.call_count, 2)
             self.assertEqual( \
                 mock_pool_manager_instance.request.call_args_list[1], \
@@ -250,6 +250,7 @@ class TestChatManager(unittest.TestCase):
                     json={
                         'model': 'llm',
                         'messages': [
+                            {'role': 'system', 'content': time_context(os.path.join(temp_dir, 'ws-memory'))},
                             {'role': 'system', 'content': memory_context(os.path.join(temp_dir, 'ws-memory'), 'What do I like?')},
                             {'role': 'user', 'content': 'What do I like?', 'images': None}
                         ],

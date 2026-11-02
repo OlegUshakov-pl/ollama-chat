@@ -8,7 +8,7 @@ import unittest.mock
 
 from ollama_chat.memory import (
     daily_file_path, ensure_workspace, find_memory_lines, forget, memory_context, memory_file_path,
-    read_memory_file, remember, workspace_dir
+    read_memory_file, remember, time_context, user_timezone, workspace_dir, write_memory_file
 )
 
 from .util import create_test_files
@@ -169,3 +169,66 @@ class TestMemory(unittest.TestCase):
             self.assertIn('mark11', context)
             self.assertIn('mark10', context)
             self.assertNotIn('mark2 ', context)
+
+
+    def test_write_memory_file(self):
+        with create_test_files([]) as temp_dir:
+            write_memory_file(temp_dir, 'USER.md', '# About the user\n\n- Name: Oleg\n')
+            self.assertEqual(read_memory_file(temp_dir, 'USER.md'), '# About the user\n\n- Name: Oleg\n')
+            self.assertRaises(ValueError, write_memory_file, temp_dir, 'unknown.md', '')
+
+
+    def test_user_timezone(self):
+        test_files = [
+            (('memory', 'USER.md'), '# About the user\n\n- Name: Oleg\n- Timezone: Europe/Warsaw\n')
+        ]
+        with create_test_files(test_files) as temp_dir:
+            timezone = user_timezone(temp_dir)
+            self.assertIsNotNone(timezone)
+            self.assertEqual(str(timezone), 'Europe/Warsaw')
+
+
+    def test_user_timezone_case(self):
+        # The "- Timezone:" bullet key matches case-insensitively
+        test_files = [
+            (('memory', 'USER.md'), '# About the user\n\n- TIMEZONE: Europe/Warsaw\n- Name: Oleg\n')
+        ]
+        with create_test_files(test_files) as temp_dir:
+            self.assertEqual(str(user_timezone(temp_dir)), 'Europe/Warsaw')
+
+
+    def test_user_timezone_none(self):
+        with create_test_files([]) as temp_dir:
+            self.assertIsNone(user_timezone(temp_dir))
+
+        # An unparseable zone name falls back to None
+        test_files = [
+            (('memory', 'USER.md'), '- Timezone: Not/AZone\n')
+        ]
+        with create_test_files(test_files) as temp_dir:
+            self.assertIsNone(user_timezone(temp_dir))
+
+
+    def test_time_context_none(self):
+        # No memory directory - no time context
+        with create_test_files([]) as temp_dir:
+            self.assertIsNone(time_context(temp_dir))
+
+
+    def test_time_context(self):
+        test_files = [
+            (('memory', 'USER.md'), '- Timezone: Europe/Warsaw\n')
+        ]
+        with create_test_files(test_files) as temp_dir:
+            context = time_context(temp_dir)
+            self.assertRegex(context, r'^Current date and time: [A-Z][a-z]{2}, \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(Europe/Warsaw\)$')
+
+
+    def test_time_context_local(self):
+        # Without a USER.md zone the local time zone (UTC offset) is used
+        test_files = [
+            (('memory', 'USER.md'), '- Name: Oleg\n')
+        ]
+        with create_test_files(test_files) as temp_dir:
+            context = time_context(temp_dir)
+            self.assertRegex(context, r'^Current date and time: [A-Z][a-z]{2}, \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(UTC[+-]\d{4}\)$')
