@@ -144,6 +144,15 @@ class TestApp(unittest.TestCase):
 
 class TestDownloadManager(unittest.TestCase):
 
+    def setUp(self):
+        # Isolate from the real workspace - a real workspace's tasks.json would start the
+        # TaskManager scheduler thread (an extra threading.Thread call)
+        env_patcher = unittest.mock.patch.dict(os.environ)
+        os.environ['OLLAMA_CHAT_WORKSPACE'] = os.path.join(os.getcwd(), 'no-such-workspace')
+        self.addCleanup(env_patcher.stop)
+        env_patcher.start()
+
+
     def test_download_fn(self):
         with create_test_files([]) as temp_dir, \
              unittest.mock.patch('threading.Thread') as mock_thread, \

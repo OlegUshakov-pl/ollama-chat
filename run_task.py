@@ -32,6 +32,12 @@ CONFIG_FILENAME = 'ollama-chat.json'
 
 
 def main(argv=None):
+    # Windows console encodings (e.g. cp1250) can't encode model output - use UTF-8 with
+    # replacement, more useful than a UnicodeEncodeError crash
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
+
     # Command line arguments
     parser = argparse.ArgumentParser(prog='run_task')
     parser.add_argument('id', help='the scheduled task ID')
