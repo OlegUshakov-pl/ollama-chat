@@ -251,8 +251,13 @@ class TestChatManager(unittest.TestCase):
                     json={
                         'model': 'llm',
                         'messages': [
-                            {'role': 'system', 'content': time_context(os.path.join(temp_dir, 'ws-memory'))},
-                            {'role': 'system', 'content': memory_context(os.path.join(temp_dir, 'ws-memory'), 'What do I like?')},
+                            {
+                                'role': 'system',
+                                'content': '\n\n'.join([
+                                    time_context(os.path.join(temp_dir, 'ws-memory')),
+                                    memory_context(os.path.join(temp_dir, 'ws-memory'), 'What do I like?')
+                                ])
+                            },
                             {'role': 'user', 'content': 'What do I like?', 'images': None}
                         ],
                         'stream': True,

@@ -15,6 +15,21 @@ def _get_ollama_url(path):
     return f'{ollama_host}{path}'
 
 
+# Extract Ollama's error message from an error response body, for display in the UI
+def _error_detail(response):
+    try:
+        body = response.json()
+    except (ValueError, AttributeError):
+        return ''
+    if isinstance(body, dict):
+        error = body.get('error')
+        if isinstance(error, str):
+            return error
+        if isinstance(error, dict):
+            return str(error.get('message') or '')
+    return ''
+
+
 # Decode a streamed, newline-delimited JSON (NDJSON) response into individual JSON objects. The
 # Ollama API streams one JSON object per line, but HTTP chunk boundaries do not align with those
 # lines - a single chunk may carry multiple objects (common with cloud models) or a partial object
@@ -49,7 +64,11 @@ def ollama_show(pool_manager, model):
     response_show = pool_manager.request('POST', url_show, json=data_show, retries=0)
     try:
         if response_show.status != 200:
-            raise urllib3.exceptions.HTTPError(f'Unknown model "{model}" ({response_show.status})')
+            error_detail = _error_detail(response_show)
+            raise urllib3.exceptions.HTTPError( \
+                f'Unknown model "{model}" ({response_show.status})' + \
+                (f': {error_detail}' if error_detail else '') \
+            )
         return response_show.json()
     finally:
         response_show.close()
@@ -72,7 +91,11 @@ def ollama_chat(pool_manager, model, messages, think=None, tools=None, model_sho
     response_chat = pool_manager.request('POST', url_chat, json=data_chat, preload_content=False, retries=0)
     try:
         if response_chat.status != 200:
-            raise urllib3.exceptions.HTTPError(f'Unknown model "{model}" ({response_chat.status})')
+            error_detail = _error_detail(response_chat)
+            raise urllib3.exceptions.HTTPError( \
+                f'Unknown model "{model}" ({response_chat.status})' + \
+                (f': {error_detail}' if error_detail else '') \
+            )
 
         # Respond with each streamed JSON chunk
         for chunk in _iter_ndjson(response_chat):

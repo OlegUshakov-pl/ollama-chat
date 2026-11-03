@@ -220,26 +220,28 @@ class ChatManager():
                         exchange['model'] = '\n\n'.join(reversed(messages))
                         continue
 
-                    # Inject the email security note before the workspace memory, so the model treats
-                    # email content as untrusted data
-                    if chat.email:
-                        messages.insert(0, {'role': 'system', 'content': EMAIL_SECURITY_PROMPT})
-
-                    # Inject the workspace memory into the system prompt (all command-only
-                    # turns are answered above with "continue", so this is a model turn)
-                    memory_text = memory_context( \
-                        workspace_dir(config), \
-                        turn_prompt, \
-                        config.get('memoryLimit', MEMORY_LIMIT_DEFAULT) \
+                    # Inject the current date and time zone (the user's zone from USER.md, or
+                    # local time), the workspace memory, and (for email turns) the email security
+                    # note - all into a single system message first in the messages. Some models'
+                    # chat templates (e.g. the GGUF-bundled Qwen templates) only accept a system
+                    # message at the very beginning of the conversation.
+                    system_parts = []
+                    time_text = time_context( \
+                        workspace_dir(config) \
+                    )
+                    if time_text:
+                        system_parts.append(time_text)
+                    memory_text = memory_context(
+                        workspace_dir(config),
+                        turn_prompt,
+                        config.get('memoryLimit', MEMORY_LIMIT_DEFAULT)
                     )
                     if memory_text:
-                        messages.insert(0, {'role': 'system', 'content': memory_text})
-
-                    # Inject the current date and time zone (the user's zone from USER.md, or
-                    # local time), so model answers can account for "today"
-                    time_text = time_context(workspace_dir(config))
-                    if time_text:
-                        messages.insert(0, {'role': 'system', 'content': time_text})
+                        system_parts.append(memory_text)
+                    if chat.email:
+                        system_parts.append(EMAIL_SECURITY_PROMPT)
+                    if system_parts:
+                        messages.insert(0, {'role': 'system', 'content': '\n\n'.join(system_parts)})
 
                 # Stream the chat response, executing the model's tool calls until it answers
                 tool_rounds = 0
