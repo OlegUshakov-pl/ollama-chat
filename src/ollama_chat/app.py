@@ -35,8 +35,7 @@ from .memory import (
 from .ollama import ollama_delete, ollama_list, ollama_pull
 from .pdf import conversation_markdown, write_pdf_file
 from .tasks import (
-    TaskManager, load_tasks, parse_task_time, task_enabled, task_latest_report, task_log_text,
-    task_remove, task_upsert
+    TaskManager, load_tasks, parse_task_time, task_enabled, task_log_text, task_remove, task_upsert
 )
 
 
@@ -74,7 +73,6 @@ class OllamaChat(chisel.Application):
         self.add_request(get_settings)
         self.add_request(get_system_info)
         self.add_request(get_task_log)
-        self.add_request(get_task_report)
         self.add_request(get_tasks)
         self.add_request(get_template)
         self.add_request(move_conversation)
@@ -229,7 +227,8 @@ def get_conversations(ctx, unused_req):
                     'id': conversation['id'],
                     'model': conversation['model'],
                     'title': conversation['title'],
-                    'generating': conversation['id'] in ctx.app.chats
+                    'generating': conversation['id'] in ctx.app.chats,
+                    **({'taskId': conversation['taskId']} if conversation.get('taskId') else {})
                 }
                 for conversation in config['conversations']
             ],
@@ -443,22 +442,6 @@ def get_task_log(ctx, req):
     if log:
         response['log'] = log
     return response
-
-
-# Get a scheduled task's latest report - the newest "## <task name> (...)" section from the
-# workspace's memory/daily files
-@chisel.action(name='getTaskReport', types=OLLAMA_CHAT_TYPES)
-def get_task_report(ctx, req):
-    with ctx.app.config() as config:
-        workspace = str(workspace_dir(config))
-    task_id = req['id']
-    task = next((task_search for task_search in load_tasks(workspace) if task_search.get('id') == task_id), None)
-    if task is None:
-        raise chisel.ActionError('UnknownTaskID', f'No task "{task_id}"')
-    report = task_latest_report(workspace, task)
-    if report is None:
-        return {}
-    return {'date': report['date'], 'report': report['report']}
 
 
 @chisel.action(name='moveConversation', types=OLLAMA_CHAT_TYPES)

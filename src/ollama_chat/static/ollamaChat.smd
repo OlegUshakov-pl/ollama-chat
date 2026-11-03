@@ -17,6 +17,9 @@ struct ConversationInfo
     # The conversation title
     string title
 
+    # The scheduled task's identifier, for conversations holding a task's run report
+    optional string taskId
+
 
 # A scheduled task's info
 struct TaskInfo
@@ -96,17 +99,6 @@ struct TaskLog
 
     # The task's log text, or null when there are no log entries
     optional string log
-
-
-# A task's latest report - the newest "## <task name> (...)" section from the workspace's
-# memory/daily files
-struct TaskReport
-
-    # The report's date, "YYYY-MM-DD", or null when there's no report
-    optional string date
-
-    # The report markdown text, or null when there's no report
-    optional string report
 
 
 # An email settings summary. The saved app password is never included - only whether one is
@@ -583,22 +575,6 @@ action getTaskLog
         string id
 
     output (TaskLog)
-
-    errors
-        UnknownTaskID
-
-
-# Get a scheduled task's latest report - the newest "## <task name> (...)" section from the
-# workspace's memory/daily files. A report is written to memory/daily on every successful run.
-action getTaskReport
-    urls
-        GET
-
-    query
-        # The task identifier
-        string id
-
-    output (TaskReport)
 
     errors
         UnknownTaskID

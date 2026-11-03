@@ -15,6 +15,7 @@ import pathlib
 import re
 import threading
 import types
+import uuid
 
 from .memory import MEMORY_LIMIT_DEFAULT, memory_context, workspace_dir
 from .ollama import ollama_chat, ollama_show
@@ -434,31 +435,6 @@ def task_log_text(workspace, task_id, max_lines=50):
     return '\n'.join(reversed(log_lines[-max_lines:]))
 
 
-# A task's latest report - the newest "## <task name> (HH:MM)" section from the workspace's
-# daily memory files. Returns {'date', 'report'}, or None when there's no report.
-def task_latest_report(workspace, task):
-    daily_dir = pathlib.Path(workspace, 'memory', 'daily')
-    if not daily_dir.is_dir():
-        return None
-    heading_prefix = f'## {str(task.get("name") or "").strip()} ('
-    for daily_path in sorted(daily_dir.glob('*.md'), reverse=True):
-        try:
-            lines = daily_path.read_text(encoding='utf-8').splitlines()
-        except OSError:
-            continue
-        section_starts = [ix for ix, line in enumerate(lines) if line.startswith(heading_prefix)]
-        if not section_starts:
-            continue
-        last_ix = section_starts[-1]
-        section_lines = lines[last_ix:]
-        for ix in range(1, len(section_lines)):
-            if section_lines[ix].startswith('## '):
-                section_lines = section_lines[:ix]
-                break
-        return {'date': daily_path.stem, 'report': '\n'.join(section_lines).strip()}
-    return None
-
-
 # The scheduled task manager, running tasks due on their schedule
 class TaskManager():
     __slots__ = ('app', 'started')
@@ -493,12 +469,19 @@ class TaskManager():
             threading.Event().wait(SCHEDULER_TICK)
 
 
-    # Run a task by ID now (e.g. from the /task run command), updating lastRun/lastError
-    def run_task_by_id(self, task_id):
+    # Run a task by ID now (e.g. the tasks page's "Run now" button), updating lastRun/lastError
+    def run_task_by_id(self, task_id, now=None):
         with self.app.config() as config:
             workspace = str(workspace_dir(config))
             memory_limit = config.get('memoryLimit', MEMORY_LIMIT_DEFAULT)
-        return run_stored_task(workspace, self.app.pool_manager, task_id, memory_limit=memory_limit)
+        now = datetime.datetime.now() if now is None else now
+        report = run_stored_task(workspace, self.app.pool_manager, task_id, memory_limit=memory_limit, now=now)
+        # On success, publish the report as a task conversation the user can continue chatting with
+        if report is not None:
+            task = next((loaded_task for loaded_task in load_tasks(workspace) if loaded_task.get('id') == task_id), None)
+            if task is not None:
+                self.add_task_conversation(task, report, now)
+        return report
 
 
     # Run all due tasks. The "now" and "catchup" arguments are for unit tests.
@@ -541,4 +524,20 @@ class TaskManager():
         delta = now - slot
         if not (delta <= datetime.timedelta(seconds=2 * SCHEDULER_TICK) or (catchup and delta <= CATCHUP_WINDOW)):
             return
-        run_stored_task(workspace, self.app.pool_manager, task['id'], memory_limit=memory_limit, now=now)
+        report = run_stored_task(workspace, self.app.pool_manager, task['id'], memory_limit=memory_limit, now=now)
+        # On success, publish the report as a task conversation the user can continue chatting with
+        if report is not None:
+            self.add_task_conversation(task, report, now)
+
+
+    # Add a "task conversation" holding a finished task run's report. The conversation appears in
+    # the sidebar's Tasks section, where the user can open it and ask questions about the report.
+    def add_task_conversation(self, task, report, now):
+        with self.app.config(save=True) as config:
+            config['conversations'].insert(0, {
+                'id': str(uuid.uuid4()),
+                'model': str(task.get('model') or ''),
+                'title': f'{task.get("name") or "Task"} {now:%Y-%m-%d %H:%M}',
+                'exchanges': [{'user': str(task.get('prompt') or ''), 'model': report}],
+                'taskId': str(task.get('id') or '')
+            })

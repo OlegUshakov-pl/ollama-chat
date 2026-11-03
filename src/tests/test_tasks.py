@@ -10,7 +10,7 @@ import unittest.mock
 
 from ollama_chat.memory import ensure_workspace
 from ollama_chat.tasks import (
-    _run_task, task_log_text, task_latest_report, task_upsert,
+    _run_task, task_log_text, task_upsert,
     load_tasks, log_task_error, log_task_event, parse_task_days, parse_task_time, run_stored_task,
     run_task_once,
     save_tasks, task_add, task_days_text, task_id_new, task_last_slot, task_remove, tasks_summary,
@@ -31,7 +31,7 @@ class TestApp():
 
 
     @contextmanager
-    def config(self, _save=False):
+    def config(self, save=False):
         yield self.config_dict
 
 
@@ -505,43 +505,6 @@ class TestTaskUpsertAndLog(unittest.TestCase):
             self.assertIsNone(task_log_text(temp_dir, 'a'))
 
 
-    def test_task_latest_report(self):
-        with create_test_files([
-            ('memory/daily/2026-02-02.md', '## Other (08:00)\n\nOther report.\n'),
-            ('memory/daily/2026-02-03.md', '# Daily\n\n## Briefing (09:00)\n\nThe report.\n\n## Other (10:00)\n\nLater.\n')
-        ]) as temp_dir:
-            report = task_latest_report(temp_dir, TEST_TASK)
-            self.assertEqual(report['date'], '2026-02-03')
-            self.assertEqual(report['report'], '## Briefing (09:00)\n\nThe report.')
-
-        with create_test_files([
-            ('memory/daily/2026-02-03.md', '## Briefing (07:00)\n\nMorning.\n\n## Briefing (08:00)\n\nSecond report.\n')
-        ]) as temp_dir:
-            report = task_latest_report(temp_dir, TEST_TASK)
-            self.assertEqual(report['date'], '2026-02-03')
-            self.assertEqual(report['report'], '## Briefing (08:00)\n\nSecond report.')
-
-        # No sections for the task in the newest file - fall back to older daily files
-        with create_test_files([
-            ('memory/daily/2026-02-02.md', '## Briefing (08:00)\n\nOld report.\n'),
-            ('memory/daily/2026-02-03.md', '## Other (09:00)\n\nOther.\n')
-        ]) as temp_dir:
-            report = task_latest_report(temp_dir, TEST_TASK)
-            self.assertEqual(report['date'], '2026-02-02')
-            self.assertEqual(report['report'], '## Briefing (08:00)\n\nOld report.')
-
-        with create_test_files([]) as temp_dir:
-            self.assertIsNone(task_latest_report(temp_dir, TEST_TASK))
-
-
-    def test_task_latest_report_renamed(self):
-        with create_test_files([
-            ('memory/daily/2026-02-03.md', '## Briefing (09:00)\n\nThe report.\n')
-        ]) as temp_dir:
-            report = task_latest_report(temp_dir, dict(TEST_TASK, name='Renamed'))
-            self.assertIsNone(report)
-
-
 class TestTaskManager(unittest.TestCase):
 
     def test_init_with_tasks_starts(self):
@@ -660,5 +623,64 @@ class TestTaskManager(unittest.TestCase):
             with unittest.mock.patch('ollama_chat.tasks.run_stored_task') as mock_run:
                 task_manager.run_task_by_id('briefing')
             mock_run.assert_called_once_with( \
-                temp_dir, app.pool_manager, 'briefing', memory_limit=3000 \
+                temp_dir, app.pool_manager, 'briefing', memory_limit=3000, now=unittest.mock.ANY \
             )
+
+
+    def test_run_task_by_id_adds_task_conversation(self):
+        with create_test_files([]) as temp_dir:
+            save_tasks(temp_dir, [TEST_TASK])
+            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            task_manager = make_task_manager(app)
+            now = datetime.datetime(2026, 2, 3, 9, 30)
+            with mock_ollama([[{'message': {'content': 'The report.'}}]], capabilities=['tools']):
+                report = task_manager.run_task_by_id('briefing', now=now)
+            self.assertEqual(report, 'The report.')
+            conversations = app.config_dict['conversations']
+            self.assertEqual(len(conversations), 1)
+            conversation = conversations[0]
+            self.assertEqual(conversation['taskId'], 'briefing')
+            self.assertEqual(conversation['model'], 'llm')
+            self.assertEqual(conversation['title'], 'Briefing 2026-02-03 09:30')
+            self.assertEqual( \
+                conversation['exchanges'], [{'user': 'Make a report', 'model': 'The report.'}] \
+            )
+
+
+    def test_run_task_by_id_failure_no_task_conversation(self):
+        with create_test_files([]) as temp_dir:
+            save_tasks(temp_dir, [dict(TEST_TASK, model=None)])
+            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            task_manager = make_task_manager(app)
+            report = task_manager.run_task_by_id('briefing')
+            self.assertIsNone(report)
+            self.assertListEqual(app.config_dict['conversations'], [])
+
+
+    def test_tick_adds_task_conversation(self):
+        with create_test_files([]) as temp_dir:
+            save_tasks(temp_dir, [TEST_TASK])
+            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            task_manager = make_task_manager(app)
+            now = datetime.datetime(2026, 2, 3, 9, 10)  # within the catch-up window
+            with unittest.mock.patch('ollama_chat.tasks.run_stored_task') as mock_run:
+                mock_run.return_value = 'The report.'
+                task_manager.tick(now=now)
+            conversation = app.config_dict['conversations'][0]
+            self.assertEqual(conversation['taskId'], 'briefing')
+            self.assertEqual(conversation['title'], 'Briefing 2026-02-03 09:10')
+            self.assertEqual( \
+                conversation['exchanges'], [{'user': 'Make a report', 'model': 'The report.'}] \
+            )
+
+
+    def test_tick_failure_no_task_conversation(self):
+        with create_test_files([]) as temp_dir:
+            save_tasks(temp_dir, [TEST_TASK])
+            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            task_manager = make_task_manager(app)
+            now = datetime.datetime(2026, 2, 3, 9, 10)  # within the catch-up window
+            with unittest.mock.patch('ollama_chat.tasks.run_stored_task') as mock_run:
+                mock_run.return_value = None
+                task_manager.tick(now=now)
+            self.assertListEqual(app.config_dict['conversations'], [])

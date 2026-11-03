@@ -8,6 +8,7 @@ const STRINGS = {
     navChat: 'Chat',
     navNewChat: 'New chat',
     chatsHeading: 'Chats',
+    tasksHeading: 'Tasks',
     greeting: 'How can I help you today?',
     composerPlaceholder: 'Send a message',
     errorBannerPrefix: 'Error: ',
@@ -20,6 +21,7 @@ const STRINGS = {
     openSidebar: 'Open sidebar',
     themeToggle: 'Toggle theme',
     noConversations: 'No conversations yet.',
+    noTaskRuns: 'Run a task to see results here.',
     loading: 'Loading…',
     chatMenu: 'Chat actions',
     menuRename: 'Rename',
@@ -150,10 +152,7 @@ const STRINGS = {
     scheduleEveryDay: 'every day',
     taskSaveLabel: 'Save task',
     taskLogTitle: 'Task log',
-    taskReportTitle: 'Report',
-    taskReportFrom: 'from',
     noTaskLog: 'No log entries for this task yet.',
-    noTaskReport: 'No report yet - run the task and it will be saved to memory/daily.',
     toolsTaskWebSearch: 'Web search',
     toolsTaskFetchPage: 'Open pages',
     toolsTaskCheckEmail: 'Read email',
@@ -266,7 +265,6 @@ const state = {
     tasksPage: { loading: false, error: null, items: null, timer: null },
     taskForm: null,
     taskLog: null,
-    taskReport: null,
 };
 
 function loadThinkingEnabled() {
@@ -1080,23 +1078,6 @@ async function openTaskLog(taskId) {
     render();
 }
 
-/** Show a task's latest report (the newest memory/daily section for the task). */
-async function openTaskReport(taskId) {
-    const item = (state.tasksPage.items || []).find((task) => task.id === taskId);
-    state.taskReport = { id: taskId, name: item ? item.name : taskId, loading: true, date: null, text: null, error: null };
-    render();
-    try {
-        const data = await apiGet('getTaskReport', `id=${encodeURIComponent(taskId)}`);
-        state.taskReport = {
-            id: taskId, name: item ? item.name : taskId, loading: false,
-            date: data.date || null, text: data.report || null, error: null
-        };
-    } catch (err) {
-        state.taskReport = { id: taskId, name: item ? item.name : taskId, loading: false, date: null, text: null, error: err.message };
-    }
-    render();
-}
-
 function applyTheme(theme) {
     if (theme) {
         document.documentElement.setAttribute('data-theme', theme);
@@ -1601,7 +1582,6 @@ function buildTasksListHtml() {
             `</div>` +
             `<div class="task-actions">` +
             `<button type="button" class="btn" data-action="task-run" data-id="${escapeHtml(item.id)}">${ICONS.play}${escapeHtml(STRINGS.taskRunNow)}</button>` +
-            `<button type="button" class="btn" data-action="task-report" data-id="${escapeHtml(item.id)}">${escapeHtml(STRINGS.taskReportTitle)}</button>` +
             `<button type="button" class="btn" data-action="task-log" data-id="${escapeHtml(item.id)}">${escapeHtml(STRINGS.taskLogTitle)}</button>` +
             `<button type="button" class="icon-btn" data-action="task-edit" data-id="${escapeHtml(item.id)}" ` +
             `title="${escapeHtml(STRINGS.taskEditTitle)}" aria-label="${escapeHtml(STRINGS.taskEditTitle)}">${ICONS.edit}</button>` +
@@ -1701,29 +1681,6 @@ function buildTaskLogHtml() {
         `</div></div></div>`;
 }
 
-function buildTaskReportHtml() {
-    const report = state.taskReport;
-    if (!report) {
-        return '';
-    }
-    const titleText = report.date
-        ? `${report.name} - ${STRINGS.taskReportFrom} ${report.date}`
-        : report.name;
-    return `<div class="modal-overlay" id="modal-overlay">` +
-        `<div class="modal modal-wide" role="dialog" aria-modal="true" aria-label="${escapeHtml(STRINGS.taskReportTitle)}">` +
-        `<h2>${escapeHtml(titleText)}</h2>` +
-        (report.loading
-            ? `<p class="page-status">${escapeHtml(STRINGS.loading)}</p>`
-            : report.error
-                ? `<div class="error-banner" role="alert">${escapeHtml(`${STRINGS.errorBannerPrefix}${report.error}`)}</div>`
-                : report.text
-                    ? `<div class="md task-report">${renderMarkdown(report.text)}</div>`
-                    : `<p class="page-status">${escapeHtml(STRINGS.noTaskReport)}</p>`) +
-        `<div class="modal-actions">` +
-        `<button type="button" class="btn" data-action="task-report-close">${escapeHtml(STRINGS.close)}</button>` +
-        `</div></div></div>`;
-}
-
 function buildTasksHtml() {
     const header =
         `<div class="panel-actions tasks-header">` +
@@ -1781,10 +1738,17 @@ function buildMessagesHtml() {
 }
 
 function buildSidebarListHtml() {
-    if (!state.conversations.length) {
-        return `<p class="chat-list-title">${escapeHtml(STRINGS.noConversations)}</p>`;
-    }
-    return state.conversations.map(renderChatItem).join('');
+    const taskRuns = state.conversations.filter((conv) => conv.taskId);
+    const chats = state.conversations.filter((conv) => !conv.taskId);
+    let html = `<p class="chat-list-title">${escapeHtml(STRINGS.tasksHeading)}</p>`;
+    html += taskRuns.length
+        ? taskRuns.map(renderChatItem).join('')
+        : `<p class="chat-list-title">${escapeHtml(STRINGS.noTaskRuns)}</p>`;
+    html += `<p class="chat-list-title">${escapeHtml(STRINGS.chatsHeading)}</p>`;
+    html += chats.length
+        ? chats.map(renderChatItem).join('')
+        : `<p class="chat-list-title">${escapeHtml(STRINGS.noConversations)}</p>`;
+    return html;
 }
 
 function renderChatItem(conv) {
@@ -1798,7 +1762,9 @@ function renderChatItem(conv) {
             `</div>`
         : '';
     return `<div class="chat-item${active}${menuOpen}">` +
-        `<a class="chat-link" href="#/c/${escapeHtml(conv.id)}" title="${escapeHtml(conv.title || conv.id)}">${escapeHtml(conv.title || conv.id)}</a>` +
+        `<a class="chat-link" href="#/c/${escapeHtml(conv.id)}" title="${escapeHtml(conv.title || conv.id)}">` +
+        (conv.taskId ? `${ICONS.checklist} ` : '') +
+        `${escapeHtml(conv.title || conv.id)}</a>` +
         (conv.generating ? `<span class="gen-dot" title="${escapeHtml(STRINGS.generating)}" aria-label="${escapeHtml(STRINGS.generating)}"></span>` : '') +
         `<button type="button" class="icon-btn chat-menu-btn" data-action="menu" data-id="${escapeHtml(conv.id)}" ` +
         `title="${escapeHtml(STRINGS.chatMenu)}" aria-label="${escapeHtml(STRINGS.chatMenu)}" aria-haspopup="menu" aria-expanded="${state.openMenuId === conv.id}">${ICONS.dots}</button>` +
@@ -1990,11 +1956,8 @@ function buildSidebarHtml(theme) {
         `</aside>`;
 }
 
-/** The task form, task log and task report modals (rendered next to the shared modal). */
+/** The task form and task log modals (rendered next to the shared modal). */
 function renderModalTask() {
-    if (state.taskReport) {
-        return buildTaskReportHtml();
-    }
     if (state.taskLog) {
         return buildTaskLogHtml();
     }
@@ -2256,7 +2219,6 @@ function onHashChange() {
     state.notice = null;
     state.taskForm = null;
     state.taskLog = null;
-    state.taskReport = null;
     state.thinkingOpen = {};
     state.toolsOpen = {};
     document.getElementById('layout')?.classList.remove('sidebar-open');
@@ -2321,8 +2283,6 @@ function onRootClick(event) {
             runTaskNow(id);
         } else if (action === 'task-log') {
             openTaskLog(id);
-        } else if (action === 'task-report') {
-            openTaskReport(id);
         } else if (action === 'task-toggle') {
             toggleTask(id);
         } else if (action === 'task-day') {
@@ -2335,9 +2295,6 @@ function onRootClick(event) {
             render();
         } else if (action === 'task-log-close') {
             state.taskLog = null;
-            render();
-        } else if (action === 'task-report-close') {
-            state.taskReport = null;
             render();
         } else if (action === 'retry' && state.route.name === 'chat') {
             loadConversation(state.route.id);
@@ -2402,7 +2359,6 @@ function onRootClick(event) {
         state.modal = null;
         state.taskForm = null;
         state.taskLog = null;
-        state.taskReport = null;
         render();
         return;
     }
@@ -2505,9 +2461,6 @@ function onKeyDown(event) {
             render();
         } else if (state.taskLog) {
             state.taskLog = null;
-            render();
-        } else if (state.taskReport) {
-            state.taskReport = null;
             render();
         } else if (state.mdViewer) {
             state.mdViewer = null;
