@@ -285,6 +285,11 @@ def run_stored_task(workspace, pool_manager, task_id, memory_limit=MEMORY_LIMIT_
         report = _run_task(pool_manager, workspace, task, memory_limit=memory_limit, now=now)
         write_task_result(workspace, task, now, report)
         task['lastError'] = None
+        log_task_event( \
+            workspace, task_id, \
+            f'report saved to memory/daily/{now:%Y-%m-%d}.md, {len(report)} characters', \
+            now=now \
+        )
     except Exception as exc:
         log_task_error(workspace, task_id, exc, now=now)
         task['lastError'] = str(exc)
@@ -393,14 +398,24 @@ def write_task_result(workspace, task, now, report):
 
 # Log a task error to workspace/logs/YYYY-MM-DD.log
 def log_task_error(workspace, task_id, error, now=None):
+    _log_task_line(workspace, task_id, 'ERROR', str(error), now=now)
+
+
+# Log a task event (e.g. a successful run) to workspace/logs/YYYY-MM-DD.log
+def log_task_event(workspace, task_id, message, now=None):
+    _log_task_line(workspace, task_id, 'OK', str(message), now=now)
+
+
+def _log_task_line(workspace, task_id, level, message, now=None):
     now = datetime.datetime.now() if now is None else now
     logs_dir = pathlib.Path(workspace, LOGS_DIRNAME)
     logs_dir.mkdir(parents=True, exist_ok=True)
     with open(logs_dir / f'{now:%Y-%m-%d}.log', 'a', encoding='utf-8') as logs_fh:
-        logs_fh.write(f'{now:%H:%M:%S} ERROR task "{task_id}": {error}\n')
+        logs_fh.write(f'{now:%H:%M:%S} {level} task "{task_id}": {message}\n')
 
 
-# A task's run log - the workspace's daily log lines that mention the task, oldest first.
+# A task's run log - the workspace's log lines that mention the task, oldest first. Each line
+# is prefixed with its log file's date, so entries from different days are distinguishable.
 # Returns the log text, or None when there are no log lines for the task.
 def task_log_text(workspace, task_id, max_lines=50):
     logs_dir = pathlib.Path(workspace, LOGS_DIRNAME)
@@ -409,13 +424,39 @@ def task_log_text(workspace, task_id, max_lines=50):
         for log_path in sorted(logs_dir.glob('*.log'), reverse=True):
             try:
                 with open(log_path, 'r', encoding='utf-8') as log_fh:
-                    lines.extend(reversed(log_fh.read().splitlines()))
+                    content_lines = log_fh.read().splitlines()
             except OSError:
                 continue
+            lines.extend(reversed([f'{log_path.stem} {line}' for line in content_lines]))
     log_lines = [line for line in lines if f'task "{task_id}"' in line]
     if not log_lines:
         return None
     return '\n'.join(reversed(log_lines[-max_lines:]))
+
+
+# A task's latest report - the newest "## <task name> (HH:MM)" section from the workspace's
+# daily memory files. Returns {'date', 'report'}, or None when there's no report.
+def task_latest_report(workspace, task):
+    daily_dir = pathlib.Path(workspace, 'memory', 'daily')
+    if not daily_dir.is_dir():
+        return None
+    heading_prefix = f'## {str(task.get("name") or "").strip()} ('
+    for daily_path in sorted(daily_dir.glob('*.md'), reverse=True):
+        try:
+            lines = daily_path.read_text(encoding='utf-8').splitlines()
+        except OSError:
+            continue
+        section_starts = [ix for ix, line in enumerate(lines) if line.startswith(heading_prefix)]
+        if not section_starts:
+            continue
+        last_ix = section_starts[-1]
+        section_lines = lines[last_ix:]
+        for ix in range(1, len(section_lines)):
+            if section_lines[ix].startswith('## '):
+                section_lines = section_lines[:ix]
+                break
+        return {'date': daily_path.stem, 'report': '\n'.join(section_lines).strip()}
+    return None
 
 
 # The scheduled task manager, running tasks due on their schedule

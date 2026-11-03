@@ -50,6 +50,7 @@ class TestApp(unittest.TestCase):
                     'getSettings',
                     'getSystemInfo',
                     'getTaskLog',
+                    'getTaskReport',
                     'getTasks',
                     'getTemplate',
                     'index.html',
@@ -110,6 +111,7 @@ class TestApp(unittest.TestCase):
                     'getSettings',
                     'getSystemInfo',
                     'getTaskLog',
+                    'getTaskReport',
                     'getTasks',
                     'getTemplate',
                     'index.html',
@@ -765,9 +767,41 @@ class TestAPI(unittest.TestCase):
             status, _headers, content_bytes = app.request('GET', '/getTaskLog', \
                 query_string=encode_query_string({'id': 't'}))
             response = json.loads(content_bytes.decode('utf-8'))
-            self.assertEqual(response['log'], '09:00 ERROR task "t": boom')
+            self.assertEqual(response['log'], '2026-02-03 09:00 ERROR task "t": boom')
 
             status, _headers, content_bytes = app.request('GET', '/getTaskLog', \
+                query_string=encode_query_string({'id': 'nope'}))
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            self.assertEqual(response['error'], 'UnknownTaskID')
+
+
+    def test_get_task_report(self):
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            from ollama_chat.tasks import save_tasks  # pylint: disable=import-outside-toplevel
+            save_tasks(temp_dir, [{
+                'id': 't', 'name': 'T', 'time': '09:00', 'days': [1], 'prompt': 'p', 'model': 'llm',
+                'num_ctx': None, 'tools': [], 'dest': 'daily', 'lastRun': None, 'lastError': None
+            }])
+
+            # No report yet -> an empty response
+            status, _headers, content_bytes = app.request('GET', '/getTaskReport', \
+                query_string=encode_query_string({'id': 't'}))
+            self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {})
+
+            os.makedirs(os.path.join(temp_dir, 'memory', 'daily'))
+            with open(os.path.join(temp_dir, 'memory', 'daily', '2026-02-03.md'), 'w', encoding='utf-8') as md_fh:
+                md_fh.write('## T (09:00)\n\nThe report.\n')
+
+            status, _headers, content_bytes = app.request('GET', '/getTaskReport', \
+                query_string=encode_query_string({'id': 't'}))
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertEqual(response, {'date': '2026-02-03', 'report': '## T (09:00)\n\nThe report.'})
+
+            status, _headers, content_bytes = app.request('GET', '/getTaskReport', \
                 query_string=encode_query_string({'id': 'nope'}))
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertEqual(status, '400 Bad Request')

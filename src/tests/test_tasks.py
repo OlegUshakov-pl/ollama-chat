@@ -10,8 +10,9 @@ import unittest.mock
 
 from ollama_chat.memory import ensure_workspace
 from ollama_chat.tasks import (
-    _run_task, task_log_text, task_upsert,
-    load_tasks, log_task_error, parse_task_days, parse_task_time, run_stored_task, run_task_once,
+    _run_task, task_log_text, task_latest_report, task_upsert,
+    load_tasks, log_task_error, log_task_event, parse_task_days, parse_task_time, run_stored_task,
+    run_task_once,
     save_tasks, task_add, task_days_text, task_id_new, task_last_slot, task_remove, tasks_summary,
     tasks_path, write_task_result, TaskManager
 )
@@ -281,6 +282,15 @@ class TestTaskResult(unittest.TestCase):
             self.assertEqual(contents, '09:30:15 ERROR task "briefing": boom\n')
 
 
+    def test_log_task_event(self):
+        with create_test_files([]) as temp_dir:
+            now = datetime.datetime(2026, 2, 3, 9, 30, 15)
+            log_task_event(temp_dir, 'briefing', 'report saved', now=now)
+            with open(os.path.join(temp_dir, 'logs', '2026-02-03.log'), encoding='utf-8') as log_fh:
+                contents = log_fh.read()
+            self.assertEqual(contents, '09:30:15 OK task "briefing": report saved\n')
+
+
 # A context manager combining the ollama_chat and ollama_show mocks. "rounds" is a list of
 # round-specific chunk lists - round N of the tool-calling loop returns round N's chunks.
 @contextmanager
@@ -307,6 +317,8 @@ class TestRunStoredTask(unittest.TestCase):
             self.assertTrue( \
                 os.path.isfile(os.path.join(temp_dir, 'memory', 'daily', '2026-02-03.md')) \
             )
+            with open(os.path.join(temp_dir, 'logs', '2026-02-03.log'), encoding='utf-8') as log_fh:
+                self.assertIn('OK task "briefing"', log_fh.read())
 
 
     def test_run_stored_task_failure(self):
@@ -486,11 +498,48 @@ class TestTaskUpsertAndLog(unittest.TestCase):
         ]) as temp_dir:
             self.assertEqual( \
                 task_log_text(temp_dir, 'a'), \
-                '09:00 ERROR task "a": boom\n10:00 ERROR task "a": again' \
+                '2026-02-02 09:00 ERROR task "a": boom\n2026-02-03 10:00 ERROR task "a": again' \
             )
             self.assertIsNone(task_log_text(temp_dir, 'missing'))
         with create_test_files([]) as temp_dir:
             self.assertIsNone(task_log_text(temp_dir, 'a'))
+
+
+    def test_task_latest_report(self):
+        with create_test_files([
+            ('memory/daily/2026-02-02.md', '## Other (08:00)\n\nOther report.\n'),
+            ('memory/daily/2026-02-03.md', '# Daily\n\n## Briefing (09:00)\n\nThe report.\n\n## Other (10:00)\n\nLater.\n')
+        ]) as temp_dir:
+            report = task_latest_report(temp_dir, TEST_TASK)
+            self.assertEqual(report['date'], '2026-02-03')
+            self.assertEqual(report['report'], '## Briefing (09:00)\n\nThe report.')
+
+        with create_test_files([
+            ('memory/daily/2026-02-03.md', '## Briefing (07:00)\n\nMorning.\n\n## Briefing (08:00)\n\nSecond report.\n')
+        ]) as temp_dir:
+            report = task_latest_report(temp_dir, TEST_TASK)
+            self.assertEqual(report['date'], '2026-02-03')
+            self.assertEqual(report['report'], '## Briefing (08:00)\n\nSecond report.')
+
+        # No sections for the task in the newest file - fall back to older daily files
+        with create_test_files([
+            ('memory/daily/2026-02-02.md', '## Briefing (08:00)\n\nOld report.\n'),
+            ('memory/daily/2026-02-03.md', '## Other (09:00)\n\nOther.\n')
+        ]) as temp_dir:
+            report = task_latest_report(temp_dir, TEST_TASK)
+            self.assertEqual(report['date'], '2026-02-02')
+            self.assertEqual(report['report'], '## Briefing (08:00)\n\nOld report.')
+
+        with create_test_files([]) as temp_dir:
+            self.assertIsNone(task_latest_report(temp_dir, TEST_TASK))
+
+
+    def test_task_latest_report_renamed(self):
+        with create_test_files([
+            ('memory/daily/2026-02-03.md', '## Briefing (09:00)\n\nThe report.\n')
+        ]) as temp_dir:
+            report = task_latest_report(temp_dir, dict(TEST_TASK, name='Renamed'))
+            self.assertIsNone(report)
 
 
 class TestTaskManager(unittest.TestCase):

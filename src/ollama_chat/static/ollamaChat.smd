@@ -98,6 +98,17 @@ struct TaskLog
     optional string log
 
 
+# A task's latest report - the newest "## <task name> (...)" section from the workspace's
+# memory/daily files
+struct TaskReport
+
+    # The report's date, "YYYY-MM-DD", or null when there's no report
+    optional string date
+
+    # The report markdown text, or null when there's no report
+    optional string report
+
+
 # An email settings summary. The saved app password is never included - only whether one is
 # saved (hasPassword).
 struct EmailSettings
@@ -572,6 +583,22 @@ action getTaskLog
         string id
 
     output (TaskLog)
+
+    errors
+        UnknownTaskID
+
+
+# Get a scheduled task's latest report - the newest "## <task name> (...)" section from the
+# workspace's memory/daily files. A report is written to memory/daily on every successful run.
+action getTaskReport
+    urls
+        GET
+
+    query
+        # The task identifier
+        string id
+
+    output (TaskReport)
 
     errors
         UnknownTaskID
