@@ -200,6 +200,9 @@ const POLL_MS = 400;
 /** Poll interval (ms) for the tasks page list refresh. */
 const TASKS_POLL_MS = 4000;
 
+/** Poll interval (ms) refreshing the sidebar's task runs and chats without a page reload. */
+const SIDEBAR_POLL_MS = 5000;
+
 /** The task tools thetasks form offers, in order (send_email is opt-in: unchecked). */
 const TASK_FORM_TOOLS = ['web_search', 'fetch_page', 'check_email', 'send_email'];
 
@@ -239,6 +242,8 @@ let uploadFiles = [];
 const state = {
     route: parseRoute(),
     conversations: [],
+    sidebarTimer: null,
+    sidebarSnapshot: null,
     error: null,
     openMenuId: null,
     modal: null,
@@ -1951,7 +1956,6 @@ function buildSidebarHtml(theme) {
         `<a class="nav-item${routeName === 'profile' ? ' active' : ''}" href="#/profile">${ICONS.user}<span>${escapeHtml(STRINGS.navProfile)}</span></a>` +
         `</nav>` +
         (work ? `<p class="workspace-label" title="${escapeHtml(state.workspace)}">${ICONS.folder}<span>${escapeHtml(work)}</span></p>` : '') +
-        `<p class="chat-list-title">${escapeHtml(STRINGS.chatsHeading)}</p>` +
         `<div class="chat-list" id="chat-list">${buildSidebarListHtml()}</div>` +
         `</aside>`;
 }
@@ -2193,6 +2197,7 @@ async function refreshConversations() {
     try {
         const data = await apiGet('getConversations');
         state.conversations = data.conversations || [];
+        state.sidebarSnapshot = JSON.stringify([state.conversations, data.workspace]);
         if (data.workspace) {
             state.workspace = data.workspace;
         }
@@ -2204,6 +2209,38 @@ async function refreshConversations() {
         state.error = `${STRINGS.errorLoadConversations} ${err.message}`;
     }
     render();
+}
+
+/** Quietly fetch the conversation list, patching just the sidebar when something changed - so
+    background task runs appear in the Tasks section without a page reload. */
+async function refreshConversationsQuietly() {
+    let data;
+    try {
+        data = await apiGet('getConversations');
+    } catch (err) {
+        return; // Quiet - the sidebar keeps its last known state
+    }
+    const snapshot = JSON.stringify([data.conversations, data.workspace]);
+    if (snapshot === state.sidebarSnapshot) {
+        return;
+    }
+    state.sidebarSnapshot = snapshot;
+    state.conversations = data.conversations || [];
+    if (data.workspace) {
+        state.workspace = data.workspace;
+    }
+    if (!state.selectedModel && data.model) {
+        state.selectedModel = data.model;
+    }
+    patchSidebarList();
+}
+
+function scheduleSidebarPoll() {
+    state.sidebarTimer = setTimeout(async () => {
+        state.sidebarTimer = null;
+        await refreshConversationsQuietly();
+        scheduleSidebarPoll();
+    }, SIDEBAR_POLL_MS);
 }
 
 function onHashChange() {
@@ -2532,6 +2569,7 @@ async function init() {
         state.error = `${STRINGS.errorLoadModels} ${err.message}`;
     }
     await refreshConversations();
+    scheduleSidebarPoll();
     if (state.route.name === 'chat') {
         loadConversation(state.route.id);
     } else if (state.route.name === 'settings') {
