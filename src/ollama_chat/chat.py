@@ -49,6 +49,10 @@ _MAX_TOOL_ROUNDS = 5
 _RE_SPECIAL_TOKEN = re.compile(r'<\|[^|<>]{0,64}\|>')
 _RE_SPECIAL_TOKEN_TAIL = re.compile(r'<\|[^|<>]{0,64}$')
 
+# Raw tool-call text that a model writes into the content when the tools are no longer offered (for
+# example, "<function=web_search>{...}") - possibly closed with "</function>", possibly not closed
+_RE_TEXT_TOOL_CALL = re.compile(r'<function=[^>]*>.*?(?:</function>|(?=<function=)|$)', re.DOTALL)
+
 
 # Remove model special tokens from streamed text, holding back an incomplete trailing token until the
 # rest of it arrives in a later chunk
@@ -305,6 +309,20 @@ class ChatManager():
                             exchange['tools'].extend(tool_events)
                 if chat.stop:
                     break
+
+                # If the tool call limit was reached, the tools are no longer offered and the model
+                # may answer by "calling" tools in raw text - strip that markup from the answer and
+                # note the limit
+                if tools is not None and tool_rounds >= _MAX_TOOL_ROUNDS:
+                    cleaned_content = _RE_TEXT_TOOL_CALL.sub('', round_content)
+                    if cleaned_content != round_content:
+                        note = '\n\n_tool limit reached - the search stopped here._'
+                        with chat.app.config() as config:
+                            conversation = config_conversation(config, chat.conversation_id)
+                            exchange = conversation['exchanges'][-1]
+                            exchange['model'] = _RE_TEXT_TOOL_CALL.sub('', exchange['model']).rstrip()
+                            if cleaned_content.strip():
+                                exchange['model'] += note
 
         except Exception as exc:
             # Communicate the error

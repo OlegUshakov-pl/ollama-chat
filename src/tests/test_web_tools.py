@@ -2,6 +2,7 @@
 # https://github.com/craigahobbs/ollama-chat/blob/main/LICENSE
 
 import socket
+import time
 import unittest
 import unittest.mock
 
@@ -127,6 +128,18 @@ class TestWebToolsSSRF(unittest.TestCase):
              self.assertRaises(ValueError) as raises:
             fetch_page('http://empty.example/', mock_pool([]))
         self.assertEqual(str(raises.exception), 'cannot resolve host "empty.example"')
+
+    def test_slow_dns_lookup_times_out(self):
+        def slow_lookup(*_args, **_kwargs):
+            time.sleep(0.2)
+            return public_addrinfo()
+
+        with unittest.mock.patch('ollama_chat.web_tools._RESOLVE_TIMEOUT', 0.05), \
+             unittest.mock.patch('ollama_chat.web_tools.socket.getaddrinfo', side_effect=slow_lookup), \
+             self.assertRaises(ValueError) as raises:
+            fetch_page('http://slow.example/', mock_pool([]))
+        self.assertEqual(str(raises.exception), \
+            'cannot resolve host "slow.example" (DNS resolution timed out after 0.05 s)')
 
     def test_reject_invalid_url(self):
         with self.assertRaises(ValueError) as raises:

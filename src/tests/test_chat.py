@@ -2041,6 +2041,66 @@ file content
                 self.assertEqual(exchange['model'], 'Done.')
                 self.assertListEqual(exchange['tools'], [{'action': 'search', 'value': 'news'}] * 5)
 
+    def test_chat_fn_web_search_limit_text_calls(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ]
+            }))
+        ]
+        tool_call = {'function': {'name': 'web_search', 'arguments': {'query': 'news'}}}
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('threading.Thread'), \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager, \
+             unittest.mock.patch(
+                 'ollama_chat.chat.web_search',
+                 return_value=[{'title': 'Title', 'url': 'http://example.com/', 'snippet': 'Snippet'}]
+             ):
+
+            # Create a mock show response with the tools capability
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': ['tools']}
+
+            # Five rounds use parsed tool calls, then the model "calls" the tool by writing raw
+            # tool-call text into the content (the tools are no longer offered)
+            mock_tool_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_tool_response.status = 200
+            mock_tool_response.read_chunked.return_value = [
+                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8')
+            ]
+            mock_text_call_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_text_call_response.status = 200
+            mock_text_call_response.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'Partial answer. <function=web_search>' \
+                    '{"query": "more news"}}_</function>'}}).encode('utf-8')
+            ]
+
+            # Configure the mock pool manager instance
+            mock_pool_manager_instance = mock_pool_manager.return_value
+            mock_pool_manager_instance.request.side_effect = [
+                mock_show_response,
+                *[mock_tool_response for _ in range(5)],
+                mock_text_call_response
+            ]
+
+            # Create the ChatManager instance
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            chat_manager = ChatManager(app, 'conv1', ['Hello'], search=True)
+            app.chats['conv1'] = chat_manager
+
+            # Run the thread function
+            ChatManager.chat_thread_fn(chat_manager)
+            self.assertDictEqual(app.chats, {})
+
+            # The raw tool-call markup is stripped from the answer and the limit is noted
+            with app.config() as config:
+                exchange = config['conversations'][0]['exchanges'][0]
+                self.assertEqual(exchange['model'], \
+                    'Partial answer.\n\n_tool limit reached - the search stopped here._')
+
     def test_chat_fn_strips_special_tokens(self):
         test_files = [
             ('ollama-chat.json', json.dumps({

@@ -9,6 +9,7 @@ import html
 import ipaddress
 import re
 import socket
+import threading
 import urllib.parse
 
 import trafilatura
@@ -72,6 +73,13 @@ FETCH_MAX_CHARS = 6000
 
 # The page fetch timeouts (seconds)
 _FETCH_TIMEOUT = urllib3.Timeout(connect=5, read=10)
+
+# The DNS resolution timeout (seconds) - a slow or broken connection must not stall the chat
+_RESOLVE_TIMEOUT = 10.0
+
+# Capture the real thread class at import time - unit tests globally patch "threading.Thread", but
+# DNS resolution must always run (its results travel through a plain list, not a thread target)
+ThreadClass = threading.Thread
 
 # Fetch pages without retries and without following redirects - redirects are followed manually so
 # that every hop's URL is checked for internal addresses
@@ -178,18 +186,39 @@ def _check_host(hostname):
     try:
         addresses = [ipaddress.ip_address(hostname)]
     except ValueError:
-        try:
-            addresses = [
-                ipaddress.ip_address(sockaddr[0])
-                for _family, _type, _proto, _canonname, sockaddr in socket.getaddrinfo(hostname, None)
-            ]
-        except (socket.gaierror, OSError, ValueError):
-            raise ValueError(f'cannot resolve host "{hostname}"') from None
-        if not addresses:
-            raise ValueError(f'cannot resolve host "{hostname}"')
+        addresses = [ipaddress.ip_address(sockaddr[0]) for sockaddr in _resolve_host(hostname)]
+    if not addresses:
+        raise ValueError(f'cannot resolve host "{hostname}"')
     for address in addresses:
         if not address.is_global or address.is_multicast:
             raise ValueError('access to private or internal addresses is not allowed')
+
+
+# Resolve a hostname in the background so that a slow DNS lookup cannot stall the chat forever
+def _resolve_host(hostname):
+    addresses = []
+    error = None
+
+    def _lookup():
+        nonlocal error
+        try:
+            addresses.extend(
+                sockaddr
+                for _family, _type, _proto, _canonname, sockaddr in socket.getaddrinfo(hostname, None)
+            )
+        except (socket.gaierror, OSError, ValueError) as exc:
+            error = exc
+
+    thread = ThreadClass(target=_lookup, daemon=True)
+    thread.start()
+    thread.join(_RESOLVE_TIMEOUT)
+    if thread.is_alive():
+        raise ValueError( \
+            f'cannot resolve host "{hostname}" (DNS resolution timed out after {_RESOLVE_TIMEOUT:g} s)' \
+        )
+    if error is not None or not addresses:
+        raise ValueError(f'cannot resolve host "{hostname}"')
+    return addresses
 
 
 # The page's charset from its content type header (defaulting to UTF-8)
