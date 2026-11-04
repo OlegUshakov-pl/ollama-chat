@@ -5,6 +5,8 @@ import codecs
 import datetime
 import json
 import os
+import queue
+import threading
 
 import urllib3
 
@@ -38,7 +40,7 @@ def _iter_ndjson(response):
     decoder = json.JSONDecoder()
     text_decoder = codecs.getincrementaldecoder('utf-8')()
     buffer = ''
-    for data in response.read_chunked():
+    for data in _watch_chunks(response.read_chunked()):
         buffer += text_decoder.decode(data)
         while True:
             buffer = buffer.lstrip()
@@ -55,6 +57,50 @@ def _iter_ndjson(response):
     # The stream ended mid-object - the response was truncated or malformed
     if buffer.strip():
         raise urllib3.exceptions.HTTPError(f'Invalid streamed response: {buffer.strip()!r}')
+
+
+# The maximum number of seconds without a streamed chunk before the stream is considered stalled -
+# a broken model template can crash Ollama's llama-server mid-stream, leaving the connection open
+# but silent (the chat would hang forever without this watchdog)
+STREAM_IDLE_TIMEOUT = 240.0
+
+_QUEUE_CLOSED_CHUNK = object()
+
+# Capture the real thread class at import time - unit tests globally patch "threading.Thread" to
+# prevent background threads, but the watchdog reader must always run
+ThreadClass = threading.Thread
+
+
+# Read the streamed HTTP chunks from a reader thread, raising if no chunk arrives within
+# "timeout" seconds (the watchdog thread itself never blocks the reader)
+def _watch_chunks(raw_chunks, timeout=None):
+    timeout = STREAM_IDLE_TIMEOUT if timeout is None else timeout
+    chunk_queue = queue.Queue()
+    raised = None
+
+    def _read_chunks():
+        nonlocal raised
+        try:
+            for raw_chunk in raw_chunks:
+                chunk_queue.put(raw_chunk)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            raised = exc
+        chunk_queue.put(_QUEUE_CLOSED_CHUNK)
+
+    reader_thread = ThreadClass(target=_read_chunks, daemon=True)
+    reader_thread.start()
+    while True:
+        try:
+            chunk = chunk_queue.get(timeout=timeout)
+        except queue.Empty:
+            raise urllib3.exceptions.HTTPError( \
+                f'Ollama stream stalled - no data for {timeout:.0f} seconds' \
+            ) from None
+        if chunk is _QUEUE_CLOSED_CHUNK:
+            if raised is not None:
+                raise raised
+            return
+        yield chunk
 
 
 # Get an Ollama model's metadata (including its capabilities)

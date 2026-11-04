@@ -7,6 +7,7 @@ import io
 import json
 import os
 import pathlib
+import time
 import types
 import unittest
 import unittest.mock
@@ -766,6 +767,74 @@ class TestChatManager(unittest.TestCase):
             }
             with app.config() as config:
                 self.assertDictEqual(config, expected_config)
+
+
+    def test_chat_fn_stalled_stream(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}
+                ]
+            }))
+        ]
+
+        # A stream that yields one chunk and then goes silent forever - e.g. a model template
+        # crash left Ollama's llama-server dead with the connection still open
+        class StalledResponse():
+            status = 200
+
+            __slots__ = ('chunks',)
+
+            def read_chunked(self):
+                yield self.chunks[0]
+                time.sleep(1.0)
+                yield self.chunks[1]
+
+
+            def close(self):
+                pass
+
+        with create_test_files(test_files) as temp_dir:
+            stalled_response = StalledResponse()
+            stalled_response.chunks = [
+                json.dumps({'message': {'content': 'Hi '}}).encode('utf-8') + b'\n',
+                json.dumps({'message': {'content': 'there'}}).encode('utf-8') + b'\n'
+            ]
+            with unittest.mock.patch('threading.Thread'), \
+                 unittest.mock.patch('ollama_chat.ollama.STREAM_IDLE_TIMEOUT', 0.1), \
+                 unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+                mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+                mock_show_response.status = 200
+                mock_show_response.json.return_value = {'capabilities': []}
+
+                mock_pool_manager_instance = mock_pool_manager.return_value
+                mock_pool_manager_instance.request.side_effect = [mock_show_response, stalled_response]
+
+                # Create and run the ChatManager
+                config_path = os.path.join(temp_dir, 'ollama-chat.json')
+                app = OllamaChat(config_path)
+                chat_manager = ChatManager(app, 'conv1', ['Hello'])
+                app.chats['conv1'] = chat_manager
+                ChatManager.chat_thread_fn(chat_manager)
+
+                # Verify the stall surfaced as an error instead of an endless wait
+                expected_config = {
+                    'conversations': [
+                        {
+                            'id': 'conv1',
+                            'model': 'llm',
+                            'title': 'Conversation 1',
+                            'exchanges': [
+                                {
+                                    'user': 'Hello',
+                                    'model': 'Hi \n**ERROR:** Ollama stream stalled - no data for 0 seconds'
+                                }
+                            ]
+                        }
+                    ]
+                }
+                with app.config() as config:
+                    self.assertDictEqual(config, expected_config)
 
 
     def test_chat_fn_error_show(self):
