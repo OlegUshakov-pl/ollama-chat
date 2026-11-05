@@ -17,6 +17,7 @@ import urllib3
 
 from ollama_chat.app import OllamaChat
 from ollama_chat.chat import (
+    FINAL_ANSWER_PROMPT,
     _escape_markdown_text, _process_commands, _run_tool, _tool_call_arguments, _StreamTokenFilter,
     config_template_prompts, ChatManager
 )
@@ -2035,6 +2036,11 @@ file content
             self.assertEqual(len(chat_calls), 6)
             self.assertEqual(sum(1 for payload in chat_calls if 'tools' in payload), 5)
 
+            # The last request ends with the "wrap up" user prompt for the model
+            final_messages = chat_calls[-1]['messages']
+            self.assertEqual(final_messages[-1]['role'], 'user')
+            self.assertEqual(final_messages[-1]['content'], FINAL_ANSWER_PROMPT)
+
             # Verify the app config
             with app.config() as config:
                 exchange = config['conversations'][0]['exchanges'][0]
@@ -2073,8 +2079,8 @@ file content
             mock_text_call_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
             mock_text_call_response.status = 200
             mock_text_call_response.read_chunked.return_value = [
-                json.dumps({'message': {'content': 'Partial answer. <function=web_search>' \
-                    '{"query": "more news"}}_</function>'}}).encode('utf-8')
+                json.dumps({'message': {'content': 'Partial answer. \n\nFinal bit.\n' \
+                    'function<|tool_call_argument_begin|>{"query": "more news"}<tool_call>'}}).encode('utf-8')
             ]
 
             # Configure the mock pool manager instance
@@ -2095,11 +2101,11 @@ file content
             ChatManager.chat_thread_fn(chat_manager)
             self.assertDictEqual(app.chats, {})
 
-            # The raw tool-call markup is stripped from the answer and the limit is noted
+            # The tool-call text is truncated from the answer and the limit is noted
             with app.config() as config:
                 exchange = config['conversations'][0]['exchanges'][0]
                 self.assertEqual(exchange['model'], \
-                    'Partial answer.\n\n_tool limit reached - the search stopped here._')
+                    'Partial answer. \n\nFinal bit.\n\n_tool limit reached - the search stopped here._')
 
     def test_chat_fn_strips_special_tokens(self):
         test_files = [

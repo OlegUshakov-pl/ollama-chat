@@ -44,14 +44,24 @@ EMAIL_SECURITY_PROMPT = (
 # The maximum number of tool call rounds per chat response
 _MAX_TOOL_ROUNDS = 5
 
+# The user-message prompt appended when the tool call budget is exhausted - it forces a final answer
+# from the tool results gathered so far, instead of another round of tool call planning
+FINAL_ANSWER_PROMPT = (
+    'You have used the maximum number of web tool calls for this turn. Do not call any more tools '
+    'and do not plan any more tool calls. Write your final answer to the conversation now, in the '
+    'conversation\'s language, using only the information you have gathered so far.'
+)
+
 
 # Model special tokens (e.g. "<|tool_response|>") that some chat templates leak into the streamed text
 _RE_SPECIAL_TOKEN = re.compile(r'<\|[^|<>]{0,64}\|>')
 _RE_SPECIAL_TOKEN_TAIL = re.compile(r'<\|[^|<>]{0,64}$')
 
-# Raw tool-call text that a model writes into the content when the tools are no longer offered (for
-# example, "<function=web_search>{...}") - possibly closed with "</function>", possibly not closed
-_RE_TEXT_TOOL_CALL = re.compile(r'<function=[^>]*>.*?(?:</function>|(?=<function=)|$)', re.DOTALL)
+# The start of raw tool-call text that a model writes into the content when the tools are no longer
+# offered, in several flavors - "<function=web_search>{...}", "function{...}<tool_call>" (the template's
+# "<|tool_call_begin|>" wrapper having been stripped), etc. The tool-call text and everything after
+# it is planning, not the answer, and gets truncated away
+_RE_TOOL_CALL_MARK = re.compile(r'<function=|</?tool_call>|function\s*\{')
 
 
 # Remove model special tokens from streamed text, holding back an incomplete trailing token until the
@@ -253,6 +263,11 @@ class ChatManager():
                     # Offer the tools until the tool call limit is reached
                     request_tools = tools if tools is None or tool_rounds < _MAX_TOOL_ROUNDS else None
 
+                    # The tool call budget was just exhausted - tell the model to wrap up instead of
+                    # planning more tool calls, which models otherwise emit as raw tool-call text
+                    if tools is not None and request_tools is None:
+                        messages.append({'role': 'user', 'content': FINAL_ANSWER_PROMPT})
+
                     # Stream this round's response, collecting the model's tool calls
                     round_content = ''
                     tool_calls = []
@@ -311,18 +326,20 @@ class ChatManager():
                     break
 
                 # If the tool call limit was reached, the tools are no longer offered and the model
-                # may answer by "calling" tools in raw text - strip that markup from the answer and
-                # note the limit
+                # may still answer with raw tool-call text - truncate that markup from the answer
+                # and note the limit
                 if tools is not None and tool_rounds >= _MAX_TOOL_ROUNDS:
-                    cleaned_content = _RE_TEXT_TOOL_CALL.sub('', round_content)
-                    if cleaned_content != round_content:
-                        note = '\n\n_tool limit reached - the search stopped here._'
+                    match = _RE_TOOL_CALL_MARK.search(round_content)
+                    if match is not None:
                         with chat.app.config() as config:
                             conversation = config_conversation(config, chat.conversation_id)
                             exchange = conversation['exchanges'][-1]
-                            exchange['model'] = _RE_TEXT_TOOL_CALL.sub('', exchange['model']).rstrip()
-                            if cleaned_content.strip():
-                                exchange['model'] += note
+                            model_match = _RE_TOOL_CALL_MARK.search(exchange['model'])
+                            if model_match is not None:
+                                exchange['model'] = exchange['model'][:model_match.start()].rstrip()
+                            else:
+                                exchange['model'] = exchange['model'].rstrip()
+                            exchange['model'] += '\n\n_tool limit reached - the search stopped here._'
 
         except Exception as exc:
             # Communicate the error
