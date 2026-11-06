@@ -251,7 +251,10 @@ is sent) and reports success or a per-protocol error.
 Tasks run a prompt on a schedule (like cron) without a conversation: they read the workspace memory,
 may use the web tools (`web_search`, `fetch_page`), generate a report with the same tool-calling loop
 as a chat, and **append the report to `<workspace>/memory/daily/YYYY-MM-DD.md`** with the task name
-and time as the heading. Errors never crash the scheduler — they are logged to
+and time as the heading. When the tool call budget is exhausted the task, like a chat, appends the
+final-answer prompt so the model writes its report; a run that still comes back empty (some models
+reply with phantom tool calls) retries the final round once, and an empty report is recorded as an
+error in `lastError`. Errors never crash the scheduler — they are logged to
 `<workspace>/logs/YYYY-MM-DD.log` and shown in `/tasks` and on the Tasks page.
 
 Tasks are stored in `<workspace>/tasks.json` — each task has `id` (unique, derived from the name),

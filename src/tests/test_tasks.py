@@ -392,6 +392,30 @@ class TestRunTask(unittest.TestCase):
                 self.assertEqual(report, 'The report after search.')
 
 
+    def test_run_task_tool_budget_exhausted(self):
+        # When the tool call budget is exhausted, the model is told to write its final answer -
+        # and tool calls in the no-tools round are ignored (MiMo emits them even then)
+        with create_test_files([]) as temp_dir:
+            ensure_workspace(temp_dir)
+            task = dict(TEST_TASK)  # tools: web_search, fetch_page
+            tool_call = {'function': {'name': 'web_search', 'arguments': {'query': 'q'}}}
+            rounds = [
+                [{'message': {'content': 'searching', 'tool_calls': [tool_call]}}],
+                [{'message': {'tool_calls': [tool_call]}}],  # a phantom tool call, no content
+                [{'message': {'content': 'The final report.'}}]
+            ]
+            with mock_ollama(rounds, capabilities=['tools']) as (mock_chat, _mock_show):
+                with unittest.mock.patch('ollama_chat.chat._MAX_TOOL_ROUNDS', 1):
+                    with unittest.mock.patch( \
+                        'ollama_chat.chat._run_tool', return_value=('tool result', {'action': 'search', 'value': 'q'}) \
+                    ):
+                        report = _run_task(unittest.mock.sentinel.pool, temp_dir, task)
+                self.assertEqual(report, 'The final report.')
+                final_messages = mock_chat.call_args_list[-1].args[2]
+                self.assertEqual(final_messages[-1], {'role': 'user', 'content': unittest.mock.ANY})
+                self.assertIn('final answer', final_messages[-1]['content'])
+
+
     def test_run_task_no_tools_capability(self):
         with create_test_files([]) as temp_dir:
             ensure_workspace(temp_dir)

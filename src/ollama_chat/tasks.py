@@ -319,7 +319,7 @@ def run_task_once(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAU
 # Run a single task, raising exceptions on failure
 def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, now=None):
     # Imported inline to avoid a circular import with the chat module
-    from .chat import _MAX_TOOL_ROUNDS, _StreamTokenFilter, _run_tool, _tool_call_arguments  # pylint: disable=import-outside-toplevel
+    from .chat import FINAL_ANSWER_PROMPT, _MAX_TOOL_ROUNDS, _StreamTokenFilter, _run_tool, _tool_call_arguments  # pylint: disable=import-outside-toplevel
 
     now = datetime.datetime.now() if now is None else now
 
@@ -347,8 +347,15 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
         allow_email_send='send_email' in (task.get('tools') or [])
     )
     tool_rounds = 0
+    final_attempts = 0
     while True:
         round_tools = request_tools if request_tools is None or tool_rounds < _MAX_TOOL_ROUNDS else None
+
+        # The tool call budget was just exhausted - tell the model to write its final answer now,
+        # instead of planning more tool calls. Some models (e.g. MiMo) keep emitting tool calls
+        # with an empty content even once the tools are no longer offered.
+        if request_tools is not None and round_tools is None and final_attempts == 0:
+            messages.append({'role': 'user', 'content': FINAL_ANSWER_PROMPT})
 
         # Stream this round's response, collecting the model's tool calls
         content_filter = _StreamTokenFilter()
@@ -362,20 +369,27 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
                 round_content += content_filter.add(message['content'])
             if message.get('tool_calls'):
                 tool_calls.extend(message['tool_calls'])
-        if not tool_calls or round_tools is None:
-            return round_content
 
-        # Execute the tool calls and add their results to the messages
-        tool_rounds += 1
-        messages.append({'role': 'assistant', 'content': round_content, 'tool_calls': tool_calls})
-        for tool_call in tool_calls:
-            tool_name, arguments = _tool_call_arguments(tool_call)
-            try:
-                tool_content, _tool_event = _run_tool(chat_shim, tool_name, arguments)
-            except Exception as exc:
-                # Tool errors are returned to the model as text rather than failing the task
-                tool_content = f'Error: {exc}'
-            messages.append({'role': 'tool', 'tool_name': tool_name, 'content': tool_content})
+        # A round with the tools still offered: execute the tool calls and loop
+        if round_tools is not None and tool_calls:
+            tool_rounds += 1
+            messages.append({'role': 'assistant', 'content': round_content, 'tool_calls': tool_calls})
+            for tool_call in tool_calls:
+                tool_name, arguments = _tool_call_arguments(tool_call)
+                try:
+                    tool_content, _tool_event = _run_tool(chat_shim, tool_name, arguments)
+                except Exception as exc:
+                    # Tool errors are returned to the model as text rather than failing the task
+                    tool_content = f'Error: {exc}'
+                messages.append({'role': 'tool', 'tool_name': tool_name, 'content': tool_content})
+            continue
+
+        # With the tools no longer offered, the round's content is the report. But a model that
+        # answers with yet more phantom tool calls and no text gets one more chance to write it -
+        # the FINAL_ANSWER_PROMPT message is already in the history.
+        if round_content or not tool_calls or final_attempts >= 1:
+            return round_content
+        final_attempts += 1
 
 
 # A task's tool argument list, as passed to ollama_chat (only the task's allowed, read-only tools)
