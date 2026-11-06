@@ -353,11 +353,11 @@ def set_profile(ctx, req):
 def get_tasks(ctx, unused_req):
     with ctx.app.config() as config:
         tasks = load_tasks(workspace_dir(config))
-    return {'tasks': [_task_details(task) for task in tasks]}
+    return {'tasks': [_task_details(task, ctx.app.tasks.task_running(task.get('id', ''))) for task in tasks]}
 
 
 # A task dict's full info response
-def _task_details(task):
+def _task_details(task, running=False):
     details = {
         'id': task.get('id', ''),
         'name': task.get('name', ''),
@@ -374,6 +374,8 @@ def _task_details(task):
         details['lastError'] = task['lastError']
     if task.get('num_ctx'):
         details['numCtx'] = task['num_ctx']
+    if running:
+        details['running'] = True
     return details
 
 
@@ -417,7 +419,8 @@ def delete_task(ctx, req):
         raise chisel.ActionError('UnknownTaskID', str(exc)) from None
 
 
-# Run a scheduled task now, in a background thread. Poll getTasks for the task's lastRun.
+# Run a scheduled task now, in a background thread. While the task runs, getTasks reports
+# "running" for it; poll for the task's lastRun to see the result.
 @chisel.action(name='runTask', types=OLLAMA_CHAT_TYPES)
 def run_task(ctx, req):
     with ctx.app.config() as config:

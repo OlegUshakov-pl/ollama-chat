@@ -710,6 +710,34 @@ class TestAPI(unittest.TestCase):
             self.assertEqual(response['error'], 'UnknownTaskID')
 
 
+    def test_get_tasks_running(self):
+        # While a task runs, getTasks reports it as "running"; otherwise "running" is omitted
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            app.request( \
+                'POST', '/setTask', \
+                wsgi_input=json.dumps({ \
+                    'name': 'T', 'time': '09:00', 'days': [1], 'model': 'llm', 'prompt': 'p', 'tools': [] \
+                }).encode('utf-8') \
+            )
+
+            responses = []
+
+            def mark_running():
+                status, _headers, content_bytes = app.request('GET', '/getTasks')
+                self.assertEqual(status, '200 OK')
+                responses.append(json.loads(content_bytes.decode('utf-8')))
+
+            app.tasks._run_tracked('t', mark_running)  # pylint: disable=protected-access
+            self.assertEqual(responses[0]['tasks'][0]['running'], True)
+
+            _status, _headers, content_bytes = app.request('GET', '/getTasks')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertNotIn('running', response['tasks'][0])
+
+
     def test_run_task(self):
         with create_test_files([]) as temp_dir, \
              unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):

@@ -45,6 +45,9 @@ struct TaskInfo
     # The task's last error message, or null
     optional string lastError
 
+    # If true, the task is running now
+    optional bool running
+
 
 # A scheduled task's full info, for the tasks page
 struct TaskDetails (TaskInfo)

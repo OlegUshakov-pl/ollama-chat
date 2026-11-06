@@ -284,6 +284,10 @@ def run_stored_task(workspace, pool_manager, task_id, memory_limit=MEMORY_LIMIT_
     report = None
     try:
         report = _run_task(pool_manager, workspace, task, memory_limit=memory_limit, now=now)
+        # An empty report is treated as a failure, so the tasks page shows why nothing was written
+        if not (report or '').strip():
+            report = None
+            raise ValueError('the model returned an empty report')
         write_task_result(workspace, task, now, report)
         task['lastError'] = None
         log_task_event( \
@@ -415,7 +419,7 @@ def _log_task_line(workspace, task_id, level, message, now=None):
         logs_fh.write(f'{now:%H:%M:%S} {level} task "{task_id}": {message}\n')
 
 
-# A task's run log - the workspace's log lines that mention the task, oldest first. Each line
+# A task's run log - the workspace's log lines that mention the task, newest first. Each line
 # is prefixed with its log file's date, so entries from different days are distinguishable.
 # Returns the log text, or None when there are no log lines for the task.
 def task_log_text(workspace, task_id, max_lines=50):
@@ -432,17 +436,19 @@ def task_log_text(workspace, task_id, max_lines=50):
     log_lines = [line for line in lines if f'task "{task_id}"' in line]
     if not log_lines:
         return None
-    return '\n'.join(reversed(log_lines[-max_lines:]))
+    return '\n'.join(log_lines[:max_lines])
 
 
 # The scheduled task manager, running tasks due on their schedule
 class TaskManager():
-    __slots__ = ('app', 'started')
+    __slots__ = ('app', 'started', 'running', 'running_lock')
 
 
     def __init__(self, app):
         self.app = app
         self.started = False
+        self.running = set()
+        self.running_lock = threading.Lock()
 
         # Start the scheduler thread when the workspace already has tasks - otherwise the
         # thread starts lazily, when a task is added
@@ -471,6 +477,11 @@ class TaskManager():
 
     # Run a task by ID now (e.g. the tasks page's "Run now" button), updating lastRun/lastError
     def run_task_by_id(self, task_id, now=None):
+        return self._run_tracked(task_id, lambda: self._run_task_by_id(task_id, now))
+
+
+    # run_task_by_id's body, wrapped to track the task's running state
+    def _run_task_by_id(self, task_id, now=None):
         with self.app.config() as config:
             workspace = str(workspace_dir(config))
             memory_limit = config.get('memoryLimit', MEMORY_LIMIT_DEFAULT)
@@ -482,6 +493,23 @@ class TaskManager():
             if task is not None:
                 self.add_task_conversation(task, report, now)
         return report
+
+
+    # Is the task currently running? (The tasks page shows a "Running" spinner.)
+    def task_running(self, task_id):
+        with self.running_lock:
+            return task_id in self.running
+
+
+    # Run a task function, tracking the task's ID as running for the duration
+    def _run_tracked(self, task_id, run_fn):
+        with self.running_lock:
+            self.running.add(task_id)
+        try:
+            return run_fn()
+        finally:
+            with self.running_lock:
+                self.running.discard(task_id)
 
 
     # Run all due tasks. The "now" and "catchup" arguments are for unit tests.
@@ -524,7 +552,9 @@ class TaskManager():
         delta = now - slot
         if not (delta <= datetime.timedelta(seconds=2 * SCHEDULER_TICK) or (catchup and delta <= CATCHUP_WINDOW)):
             return
-        report = run_stored_task(workspace, self.app.pool_manager, task['id'], memory_limit=memory_limit, now=now)
+        report = self._run_tracked(task['id'], lambda: run_stored_task( \
+            workspace, self.app.pool_manager, task['id'], memory_limit=memory_limit, now=now \
+        ))
         # On success, publish the report as a task conversation the user can continue chatting with
         if report is not None:
             self.add_task_conversation(task, report, now)

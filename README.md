@@ -270,9 +270,10 @@ The Tasks page (`#/tasks`, link `Tasks` in the sidebar) manages `tasks.json` dir
   default): a task sending e-mail has no confirmation step, so it only works when the task's tools
   explicitly include it;
 - **Run now** — runs the task in the background immediately (the result appears in the workspace
-  `memory/daily/` report and in the task's log);
+  `memory/daily/` report and in the task's log). While the task runs the list shows a "Running…"
+  spinner for it and the "Run now" button is disabled;
 - **Log** — the task's run log (the lines mentioning the task in `<workspace>/logs/*.log`,
-  oldest first);
+  newest first);
 - **Delete** — with a confirmation dialog.
 
 The prompt commands from before still work identically:

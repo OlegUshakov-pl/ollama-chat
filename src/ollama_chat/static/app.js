@@ -146,6 +146,7 @@ const STRINGS = {
     taskEnabledLabel: 'Enabled',
     taskRunNow: 'Run now',
     taskStarted: 'Task started - see the workspace logs for the result',
+    taskRunning: 'Running…',
     taskLastRun: 'Last run',
     taskSchedule: 'Schedule',
     taskEditing: 'Editing',
@@ -868,21 +869,22 @@ function scheduleTasksPoll() {
             scheduleTasksPoll();
             return;
         }
-        try {
-            const data = await apiGet('getTasks');
-            state.tasksPage.items = data.tasks || [];
-            if (state.tasksPage.error) {
-                state.tasksPage.error = null;
-                render();
-            } else {
-                patchTasksList();
-            }
-        } catch (err) {
-            state.tasksPage.error = err.message;
-            patchTasksList();
-        }
+        await refreshTasksPage();
         scheduleTasksPoll();
     }, TASKS_POLL_MS);
+}
+
+/** Fetch the tasks page's list and patch it in place (keeps the page's scroll position). */
+async function refreshTasksPage() {
+    try {
+        const data = await apiGet('getTasks');
+        state.tasksPage.items = data.tasks || [];
+        state.tasksPage.error = null;
+        patchTasksList();
+    } catch (err) {
+        state.tasksPage.error = err.message;
+        patchTasksList();
+    }
 }
 
 function stopTasksPolling() {
@@ -1041,6 +1043,11 @@ async function runTaskNow(taskId) {
         await apiPost('runTask', { id: taskId });
         state.notice = STRINGS.taskStarted;
         render();
+        // Fetch the list right away so the task's "Running" spinner appears immediately - the
+        // regular poll catches up a few seconds later
+        const data = await apiGet('getTasks');
+        state.tasksPage.items = data.tasks || [];
+        patchTasksList();
     } catch (err) {
         state.tasksPage.error = err.message;
         patchTasksList();
@@ -1582,11 +1589,13 @@ function buildTasksListHtml() {
             `<span>${escapeHtml(item.model || '')}</span>` +
             (item.lastRun ? `<span>· ${escapeHtml(STRINGS.taskLastRun)}: ${escapeHtml(item.lastRun)}</span>` : '') +
             (item.lastError ? `<span class="status-err">· ✖ ${escapeHtml(item.lastError)}</span>` : '') +
+            (item.running ? `<span class="task-running">${escapeHtml(STRINGS.taskRunning)}</span>` : '') +
             `</div>` +
             `<div class="task-tools">${(item.tools || []).map((tool) => `<span class="tool-tag">${escapeHtml(tool)}</span>`).join('')}</div>` +
             `</div>` +
             `<div class="task-actions">` +
-            `<button type="button" class="btn" data-action="task-run" data-id="${escapeHtml(item.id)}">${ICONS.play}${escapeHtml(STRINGS.taskRunNow)}</button>` +
+            `<button type="button" class="btn" data-action="task-run" data-id="${escapeHtml(item.id)}"${item.running ? ' disabled' : ''}>` +
+            `${ICONS.play}${escapeHtml(STRINGS.taskRunNow)}</button>` +
             `<button type="button" class="btn" data-action="task-log" data-id="${escapeHtml(item.id)}">${escapeHtml(STRINGS.taskLogTitle)}</button>` +
             `<button type="button" class="icon-btn" data-action="task-edit" data-id="${escapeHtml(item.id)}" ` +
             `title="${escapeHtml(STRINGS.taskEditTitle)}" aria-label="${escapeHtml(STRINGS.taskEditTitle)}">${ICONS.edit}</button>` +

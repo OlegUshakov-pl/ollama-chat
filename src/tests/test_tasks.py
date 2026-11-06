@@ -341,6 +341,21 @@ class TestRunStoredTask(unittest.TestCase):
             self.assertRaises(ValueError, run_stored_task, temp_dir, None, 'no-such-task')
 
 
+    def test_run_stored_task_empty_report(self):
+        # An empty model response is a failure - lastError is set and nothing is written to daily
+        with create_test_files([]) as temp_dir:
+            save_tasks(temp_dir, [TEST_TASK])
+            now = datetime.datetime(2026, 2, 3, 9, 30)
+            with mock_ollama([[{'message': {'content': '  \n'}}]], capabilities=['tools']):
+                report = run_stored_task(temp_dir, unittest.mock.sentinel.pool, 'briefing', now=now)
+            self.assertIsNone(report)
+            tasks = load_tasks(temp_dir)
+            self.assertIn('empty report', tasks[0]['lastError'])
+            self.assertFalse(os.path.isfile(os.path.join(temp_dir, 'memory', 'daily', '2026-02-03.md')))
+            with open(os.path.join(temp_dir, 'logs', '2026-02-03.log'), encoding='utf-8') as log_fh:
+                self.assertIn('empty report', log_fh.read())
+
+
     def test_run_task_once_never_raises(self):
         with create_test_files([]) as temp_dir:
             ensure_workspace(temp_dir)
@@ -498,11 +513,23 @@ class TestTaskUpsertAndLog(unittest.TestCase):
         ]) as temp_dir:
             self.assertEqual( \
                 task_log_text(temp_dir, 'a'), \
-                '2026-02-02 09:00 ERROR task "a": boom\n2026-02-03 10:00 ERROR task "a": again' \
+                '2026-02-03 10:00 ERROR task "a": again\n2026-02-02 09:00 ERROR task "a": boom' \
             )
             self.assertIsNone(task_log_text(temp_dir, 'missing'))
         with create_test_files([]) as temp_dir:
             self.assertIsNone(task_log_text(temp_dir, 'a'))
+
+
+    def test_task_log_text_max_lines(self):
+        # More log lines than max_lines - with the newest-first ordering only the newest lines show
+        lines = '\n'.join(f'10:{minute:02d}:00 OK task "a": line {minute}' for minute in range(10))
+        with create_test_files([('logs/2026-02-03.log', lines + '\n')]) as temp_dir:
+            self.assertEqual( \
+                task_log_text(temp_dir, 'a', max_lines=3), \
+                '2026-02-03 10:09:00 OK task "a": line 9\n' \
+                '2026-02-03 10:08:00 OK task "a": line 8\n' \
+                '2026-02-03 10:07:00 OK task "a": line 7' \
+            )
 
 
 class TestTaskManager(unittest.TestCase):
@@ -655,6 +682,36 @@ class TestTaskManager(unittest.TestCase):
             report = task_manager.run_task_by_id('briefing')
             self.assertIsNone(report)
             self.assertListEqual(app.config_dict['conversations'], [])
+
+
+    def test_run_task_tracks_running_state(self):
+        # While a task runs, task_running reports True (the tasks page's spinner); afterwards False
+        with create_test_files([]) as temp_dir, \
+             mock_ollama([[{'message': {'content': 'The report.'}}]], capabilities=['tools']):
+            save_tasks(temp_dir, [TEST_TASK])
+            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            task_manager = make_task_manager(app)
+            outer_running = []
+
+            def mock_run_stored(*_args, **_kwargs):
+                outer_running.append(task_manager.task_running('briefing'))
+                return 'The report.'
+
+            with unittest.mock.patch('ollama_chat.tasks.run_stored_task', mock_run_stored):
+                task_manager.run_task_by_id('briefing')
+            self.assertIn(True, outer_running)
+            self.assertFalse(task_manager.task_running('briefing'))
+
+
+    def test_run_task_running_clears_on_exception(self):
+        # A failed run still clears the task's running state
+        with create_test_files([]) as temp_dir:
+            save_tasks(temp_dir, [TEST_TASK])
+            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            task_manager = make_task_manager(app)
+            with unittest.mock.patch('ollama_chat.tasks.run_stored_task', side_effect=RuntimeError):
+                self.assertRaises(RuntimeError, task_manager.run_task_by_id, 'briefing')
+            self.assertFalse(task_manager.task_running('briefing'))
 
 
     def test_tick_adds_task_conversation(self):
