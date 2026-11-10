@@ -16,6 +16,7 @@ import re
 import shlex
 import sys
 import threading
+import time
 
 import urllib3
 
@@ -274,12 +275,15 @@ class ChatManager():
                     content_filter = _StreamTokenFilter()
                     thinking_filter = _StreamTokenFilter()
                     chat_done = False
+                    last_activity = time.monotonic()
                     for chunk in ollama_chat(
                         chat.app.pool_manager, model, messages,
                         think=chat.think, tools=request_tools, model_show=model_show
                     ):
                         if chat.stop:
                             break
+                        if time.monotonic() - last_activity > 120:
+                            raise TimeoutError('Chat stalled - no progress for 120 seconds')
 
                         # Update the conversation
                         with chat.app.config() as config:
@@ -298,6 +302,8 @@ class ChatManager():
                                 tool_calls.extend(message['tool_calls'])
                             if chunk.get('done'):
                                 chat_done = True
+                            if 'thinking' in message or message.get('content') or message.get('tool_calls'):
+                                last_activity = time.monotonic()
                     if chat.stop or not tool_calls or request_tools is None or chat_done:
                         break
 
