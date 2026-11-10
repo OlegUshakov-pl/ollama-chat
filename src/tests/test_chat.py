@@ -1512,7 +1512,8 @@ file content
             mock_chat_response.status = 200
             mock_chat_response.read_chunked.return_value = [
                 json.dumps({'message': {'content': 'Looking... '}}).encode('utf-8'),
-                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8')
+                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8'),
+                json.dumps({'done': True}).encode('utf-8')
             ]
 
             # Create a mock chat response with the final answer
@@ -1618,7 +1619,8 @@ file content
             mock_chat_response.status = 200
             mock_chat_response.read_chunked.return_value = [
                 json.dumps({'message': {'content': 'Checking...'}}).encode('utf-8'),
-                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8')
+                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8'),
+                json.dumps({'done': True}).encode('utf-8')
             ]
 
             # Create a mock chat response with the final answer
@@ -1710,7 +1712,8 @@ file content
             mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
             mock_chat_response.status = 200
             mock_chat_response.read_chunked.return_value = [
-                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8')
+                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8'),
+                json.dumps({'done': True}).encode('utf-8')
             ]
 
             # Create a mock chat response with the final answer
@@ -1918,7 +1921,8 @@ file content
             mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
             mock_chat_response.status = 200
             mock_chat_response.read_chunked.return_value = [
-                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8')
+                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8'),
+                json.dumps({'done': True}).encode('utf-8')
             ]
 
             # Create a mock chat response with the final answer
@@ -2006,7 +2010,8 @@ file content
             mock_tool_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
             mock_tool_response.status = 200
             mock_tool_response.read_chunked.return_value = [
-                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8')
+                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8'),
+                json.dumps({'done': True}).encode('utf-8')
             ]
             mock_final_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
             mock_final_response.status = 200
@@ -2074,7 +2079,8 @@ file content
             mock_tool_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
             mock_tool_response.status = 200
             mock_tool_response.read_chunked.return_value = [
-                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8')
+                json.dumps({'message': {'tool_calls': [tool_call]}}).encode('utf-8'),
+                json.dumps({'done': True}).encode('utf-8')
             ]
             mock_text_call_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
             mock_text_call_response.status = 200
