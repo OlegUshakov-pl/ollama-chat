@@ -273,6 +273,7 @@ class ChatManager():
                     tool_calls = []
                     content_filter = _StreamTokenFilter()
                     thinking_filter = _StreamTokenFilter()
+                    chat_done = False
                     for chunk in ollama_chat(
                         chat.app.pool_manager, model, messages,
                         think=chat.think, tools=request_tools, model_show=model_show
@@ -295,7 +296,9 @@ class ChatManager():
                                 round_content += content_text
                             if message.get('tool_calls'):
                                 tool_calls.extend(message['tool_calls'])
-                    if chat.stop or not tool_calls or request_tools is None:
+                            if chunk.get('done'):
+                                chat_done = True
+                    if chat.stop or not tool_calls or request_tools is None or chat_done:
                         break
 
                     # Execute the tool calls and add their results to the messages

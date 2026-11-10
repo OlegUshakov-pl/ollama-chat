@@ -369,6 +369,8 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
                 round_content += content_filter.add(message['content'])
             if message.get('tool_calls'):
                 tool_calls.extend(message['tool_calls'])
+            if chunk.get('done'):
+                break
 
         # A round with the tools still offered: execute the tool calls and loop
         if round_tools is not None and tool_calls:
