@@ -273,8 +273,9 @@ def task_last_slot(task, now):
 
 
 # Run a task by ID, updating lastRun/lastError and saving tasks.json. Returns the report text.
-# Used both by the app's scheduler and by the standalone run_task.py script.
-def run_stored_task(workspace, pool_manager, task_id, memory_limit=MEMORY_LIMIT_DEFAULT, now=None):
+# Used both by the app's scheduler and by the standalone run_task.py script. With a "stop"
+# threading.Event the run aborts at its next chunk or tool round once the event is set.
+def run_stored_task(workspace, pool_manager, task_id, memory_limit=MEMORY_LIMIT_DEFAULT, now=None, stop=None):
     tasks = load_tasks(workspace)
     task = next((task_search for task_search in tasks if task_search.get('id') == task_id), None)
     if task is None:
@@ -283,7 +284,7 @@ def run_stored_task(workspace, pool_manager, task_id, memory_limit=MEMORY_LIMIT_
     now = datetime.datetime.now() if now is None else now
     report = None
     try:
-        report = _run_task(pool_manager, workspace, task, memory_limit=memory_limit, now=now)
+        report = _run_task(pool_manager, workspace, task, memory_limit=memory_limit, now=now, stop=stop)
         # An empty report is treated as a failure, so the tasks page shows why nothing was written
         if not (report or '').strip():
             report = None
@@ -317,7 +318,7 @@ def run_task_once(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAU
 
 
 # Run a single task, raising exceptions on failure
-def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, now=None):
+def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, now=None, stop=None):
     # Imported inline to avoid a circular import with the chat module
     from .chat import FINAL_ANSWER_PROMPT, _MAX_TOOL_ROUNDS, _StreamTokenFilter, _run_tool, _tool_call_arguments  # pylint: disable=import-outside-toplevel
 
@@ -349,6 +350,10 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
     tool_rounds = 0
     final_attempts = 0
     while True:
+        # Stopped by the user?
+        if stop is not None and stop.is_set():
+            raise ValueError('the task was stopped')
+
         round_tools = request_tools if request_tools is None or tool_rounds < _MAX_TOOL_ROUNDS else None
 
         # The tool call budget was just exhausted - tell the model to write its final answer now,
@@ -364,6 +369,10 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
         for chunk in ollama_chat( \
             pool_manager, model, messages, think=False, tools=round_tools, num_ctx=task.get('num_ctx') \
         ):
+            # Stopped by the user?
+            if stop is not None and stop.is_set():
+                raise ValueError('the task was stopped')
+
             message = chunk.get('message') or {}
             if message.get('content'):
                 round_content += content_filter.add(message['content'])
@@ -457,7 +466,7 @@ def task_log_text(workspace, task_id, max_lines=50):
 
 # The scheduled task manager, running tasks due on their schedule
 class TaskManager():
-    __slots__ = ('app', 'started', 'running', 'running_lock')
+    __slots__ = ('app', 'started', 'running', 'running_lock', 'stop_events')
 
 
     def __init__(self, app):
@@ -465,6 +474,7 @@ class TaskManager():
         self.started = False
         self.running = set()
         self.running_lock = threading.Lock()
+        self.stop_events = {} # task ID -> threading.Event, for running tasks
 
         # Start the scheduler thread when the workspace already has tasks - otherwise the
         # thread starts lazily, when a task is added
@@ -493,16 +503,16 @@ class TaskManager():
 
     # Run a task by ID now (e.g. the tasks page's "Run now" button), updating lastRun/lastError
     def run_task_by_id(self, task_id, now=None):
-        return self._run_tracked(task_id, lambda: self._run_task_by_id(task_id, now))
+        return self._run_tracked(task_id, lambda stop: self._run_task_by_id(task_id, now, stop))
 
 
     # run_task_by_id's body, wrapped to track the task's running state
-    def _run_task_by_id(self, task_id, now=None):
+    def _run_task_by_id(self, task_id, now=None, stop=None):
         with self.app.config() as config:
             workspace = str(workspace_dir(config))
             memory_limit = config.get('memoryLimit', MEMORY_LIMIT_DEFAULT)
         now = datetime.datetime.now() if now is None else now
-        report = run_stored_task(workspace, self.app.pool_manager, task_id, memory_limit=memory_limit, now=now)
+        report = run_stored_task(workspace, self.app.pool_manager, task_id, memory_limit=memory_limit, now=now, stop=stop)
         # On success, publish the report as a task conversation the user can continue chatting with
         if report is not None:
             task = next((loaded_task for loaded_task in load_tasks(workspace) if loaded_task.get('id') == task_id), None)
@@ -517,15 +527,29 @@ class TaskManager():
             return task_id in self.running
 
 
+    # Request a running task's stop. Returns True when the task was running - the task run
+    # aborts at its next chunk or tool round, and then reports "stopped" as its lastError.
+    def stop_task(self, task_id):
+        with self.running_lock:
+            stop_event = self.stop_events.get(task_id)
+        if stop_event is None:
+            return False
+        stop_event.set()
+        return True
+
+
     # Run a task function, tracking the task's ID as running for the duration
     def _run_tracked(self, task_id, run_fn):
+        stop_event = threading.Event()
         with self.running_lock:
             self.running.add(task_id)
+            self.stop_events[task_id] = stop_event
         try:
-            return run_fn()
+            return run_fn(stop_event)
         finally:
             with self.running_lock:
                 self.running.discard(task_id)
+                self.stop_events.pop(task_id, None)
 
 
     # Run all due tasks. The "now" and "catchup" arguments are for unit tests.
@@ -535,7 +559,7 @@ class TaskManager():
             workspace = str(workspace_dir(config))
             memory_limit = config.get('memoryLimit', MEMORY_LIMIT_DEFAULT)
             if catchup is None:
-                catchup = config.get('tasksCatchUp', True)
+                catchup = config.get('tasksCatchUp', False)
 
         tasks = load_tasks(workspace)
         for task in tasks:
@@ -568,8 +592,8 @@ class TaskManager():
         delta = now - slot
         if not (delta <= datetime.timedelta(seconds=2 * SCHEDULER_TICK) or (catchup and delta <= CATCHUP_WINDOW)):
             return
-        report = self._run_tracked(task['id'], lambda: run_stored_task( \
-            workspace, self.app.pool_manager, task['id'], memory_limit=memory_limit, now=now \
+        report = self._run_tracked(task['id'], lambda stop: run_stored_task( \
+            workspace, self.app.pool_manager, task['id'], memory_limit=memory_limit, now=now, stop=stop \
         ))
         # On success, publish the report as a task conversation the user can continue chatting with
         if report is not None:

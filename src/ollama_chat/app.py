@@ -91,6 +91,7 @@ class OllamaChat(chisel.Application):
         self.add_request(start_template)
         self.add_request(stop_conversation)
         self.add_request(stop_model_download)
+        self.add_request(stop_task)
         self.add_request(test_email_connection_request)
         self.add_request(update_template)
 
@@ -430,6 +431,15 @@ def run_task(ctx, req):
         raise chisel.ActionError('UnknownTaskID', f'No task "{task_id}"')
     threading.Thread(target=ctx.app.tasks.run_task_by_id, args=(task_id,), daemon=True).start()
     return {'started': True}
+
+
+# Stop a task that is currently running. The stop takes effect at the run's next chunk or tool
+# round; the run then reports "stopped" as its lastError on the tasks page.
+@chisel.action(name='stopTask', types=OLLAMA_CHAT_TYPES)
+def stop_task(ctx, req):
+    if not ctx.app.tasks.stop_task(req['id']):
+        raise chisel.ActionError('NotRunning', f'Task "{req["id"]}" is not running')
+    return {'stopped': True}
 
 
 # Get a scheduled task's run log, from the workspace's logs directory

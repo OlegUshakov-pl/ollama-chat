@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import datetime
 import json
 import os
+import threading
 import unittest
 import unittest.mock
 
@@ -356,6 +357,47 @@ class TestRunStoredTask(unittest.TestCase):
                 self.assertIn('empty report', log_fh.read())
 
 
+    def test_run_stored_task_stopped(self):
+        # A set stop event aborts the run - lastError reports the stop and nothing is written
+        with create_test_files([]) as temp_dir:
+            save_tasks(temp_dir, [TEST_TASK])
+            now = datetime.datetime(2026, 2, 3, 9, 30)
+            stop = threading.Event()
+            stop.set()
+            with mock_ollama([[{'message': {'content': 'The report.'}}]], capabilities=['tools']):
+                report = run_stored_task( \
+                    temp_dir, unittest.mock.sentinel.pool, 'briefing', now=now, stop=stop \
+                )
+            self.assertIsNone(report)
+            tasks = load_tasks(temp_dir)
+            self.assertIn('stopped', tasks[0]['lastError'])
+            self.assertFalse(os.path.isfile(os.path.join(temp_dir, 'memory', 'daily', '2026-02-03.md')))
+
+
+    def test_stop_task_not_running(self):
+        with create_test_files([]) as temp_dir:
+            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            self.assertFalse(make_task_manager(app).stop_task('briefing'))
+
+
+    def test_stop_task_running(self):
+        # While a task runs (tracked), stop_task sets its stop event and returns True; the
+        # tracking entry is cleared after the run
+        with create_test_files([]) as temp_dir:
+            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            task_manager = make_task_manager(app)
+            observed = []
+            def run_fn(stop_event):
+                running_before = task_manager.task_running('briefing')
+                stop_result = task_manager.stop_task('briefing')
+                observed.append((running_before, stop_result, stop_event.is_set()))
+                return 'done'
+            self.assertEqual(task_manager._run_tracked('briefing', run_fn), 'done')
+            self.assertListEqual(observed, [(True, True, True)])
+            self.assertFalse(task_manager.task_running('briefing'))
+            self.assertFalse(task_manager.stop_task('briefing'))
+
+
     def test_run_task_once_never_raises(self):
         with create_test_files([]) as temp_dir:
             ensure_workspace(temp_dir)
@@ -587,14 +629,27 @@ class TestTaskManager(unittest.TestCase):
     def test_tick_due_task(self):
         with create_test_files([]) as temp_dir:
             save_tasks(temp_dir, [TEST_TASK])
-            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            app = TestApp({'conversations': [], 'workspace': temp_dir, 'tasksCatchUp': True})
             task_manager = make_task_manager(app)
             now = datetime.datetime(2026, 2, 3, 9, 10)  # within the catch-up window
             with unittest.mock.patch('ollama_chat.tasks.run_stored_task') as mock_run:
                 task_manager.tick(now=now)
             mock_run.assert_called_once_with( \
-                temp_dir, app.pool_manager, 'briefing', memory_limit=3000, now=now \
+                temp_dir, app.pool_manager, 'briefing', memory_limit=3000, now=now, \
+                stop=unittest.mock.ANY \
             )
+
+
+    def test_tick_no_catchup_default(self):
+        # Without the tasksCatchUp config key, a missed slot (app was off) does not run at startup
+        with create_test_files([]) as temp_dir:
+            save_tasks(temp_dir, [TEST_TASK])
+            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            task_manager = make_task_manager(app)
+            now = datetime.datetime(2026, 2, 3, 9, 10)  # outside the 2-tick window
+            with unittest.mock.patch('ollama_chat.tasks.run_stored_task') as mock_run:
+                task_manager.tick(now=now)
+            mock_run.assert_not_called()
 
 
     def test_tick_recent_task(self):
@@ -606,7 +661,8 @@ class TestTaskManager(unittest.TestCase):
             with unittest.mock.patch('ollama_chat.tasks.run_stored_task') as mock_run:
                 task_manager.tick(now=now)
             mock_run.assert_called_once_with( \
-                temp_dir, app.pool_manager, 'briefing', memory_limit=3000, now=now \
+                temp_dir, app.pool_manager, 'briefing', memory_limit=3000, now=now, \
+                stop=unittest.mock.ANY \
             )
 
 
@@ -674,7 +730,8 @@ class TestTaskManager(unittest.TestCase):
             with unittest.mock.patch('ollama_chat.tasks.run_stored_task') as mock_run:
                 task_manager.run_task_by_id('briefing')
             mock_run.assert_called_once_with( \
-                temp_dir, app.pool_manager, 'briefing', memory_limit=3000, now=unittest.mock.ANY \
+                temp_dir, app.pool_manager, 'briefing', memory_limit=3000, now=unittest.mock.ANY, \
+                stop=unittest.mock.ANY \
             )
 
 
@@ -741,7 +798,7 @@ class TestTaskManager(unittest.TestCase):
     def test_tick_adds_task_conversation(self):
         with create_test_files([]) as temp_dir:
             save_tasks(temp_dir, [TEST_TASK])
-            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            app = TestApp({'conversations': [], 'workspace': temp_dir, 'tasksCatchUp': True})
             task_manager = make_task_manager(app)
             now = datetime.datetime(2026, 2, 3, 9, 10)  # within the catch-up window
             with unittest.mock.patch('ollama_chat.tasks.run_stored_task') as mock_run:
@@ -758,7 +815,7 @@ class TestTaskManager(unittest.TestCase):
     def test_tick_failure_no_task_conversation(self):
         with create_test_files([]) as temp_dir:
             save_tasks(temp_dir, [TEST_TASK])
-            app = TestApp({'conversations': [], 'workspace': temp_dir})
+            app = TestApp({'conversations': [], 'workspace': temp_dir, 'tasksCatchUp': True})
             task_manager = make_task_manager(app)
             now = datetime.datetime(2026, 2, 3, 9, 10)  # within the catch-up window
             with unittest.mock.patch('ollama_chat.tasks.run_stored_task') as mock_run:

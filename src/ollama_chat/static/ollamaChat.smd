@@ -334,7 +334,7 @@ struct OllamaChatConfig
     # The user profile (memory/USER.md) character limit (default is 1500)
     optional int profileLimit
 
-    # If true, run tasks missed within the last 24 hours at application start (default is true)
+    # If true, run tasks missed within the last 24 hours at application start (default is false)
     optional bool tasksCatchUp
 
     # If true, don't save the config file
@@ -566,6 +566,24 @@ action runTask
 
     errors
         UnknownTaskID
+
+
+# Stop a task that is currently running. The stop takes effect at the run's next chunk or tool
+# round; the run then reports "stopped" as its lastError on the tasks page.
+action stopTask
+    urls
+        POST
+
+    input
+        # The task identifier
+        string id
+
+    output
+        # True, once the stop has been requested
+        bool stopped
+
+    errors
+        NotRunning
 
 
 # Get a scheduled task's run log. The log lines come from the workspace's logs directory.

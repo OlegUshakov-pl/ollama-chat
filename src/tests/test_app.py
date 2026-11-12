@@ -74,6 +74,7 @@ class TestApp(unittest.TestCase):
                     'startTemplate',
                     'stopConversation',
                     'stopModelDownload',
+                    'stopTask',
                     'testEmailConnection',
                     'updateTemplate',
                     'vendor/marked.min.js',
@@ -134,6 +135,7 @@ class TestApp(unittest.TestCase):
                     'startTemplate',
                     'stopConversation',
                     'stopModelDownload',
+                    'stopTask',
                     'testEmailConnection',
                     'updateTemplate',
                     'vendor/marked.min.js',
@@ -725,7 +727,7 @@ class TestAPI(unittest.TestCase):
 
             responses = []
 
-            def mark_running():
+            def mark_running(_stop_event):
                 status, _headers, content_bytes = app.request('GET', '/getTasks')
                 self.assertEqual(status, '200 OK')
                 responses.append(json.loads(content_bytes.decode('utf-8')))

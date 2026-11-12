@@ -145,6 +145,7 @@ const STRINGS = {
     sendEmailDefaultOff: 'off by default - a task sending email is not confirmed by anyone',
     taskEnabledLabel: 'Enabled',
     taskRunNow: 'Run now',
+    taskStop: 'Stop',
     taskStarted: 'Task started - see the workspace logs for the result',
     taskRunning: 'Running…',
     taskLastRun: 'Last run',
@@ -1054,6 +1055,20 @@ async function runTaskNow(taskId) {
     }
 }
 
+/** Stop a running task - the run aborts at its next chunk or tool round. */
+async function stopTaskNow(taskId) {
+    try {
+        await apiPost('stopTask', { id: taskId });
+        // Fetch the list right away; the "Running" spinner clears once the run thread unwinds
+        const data = await apiGet('getTasks');
+        state.tasksPage.items = data.tasks || [];
+        patchTasksList();
+    } catch (err) {
+        state.tasksPage.error = err.message;
+        patchTasksList();
+    }
+}
+
 /** Delete a task (confirm via the shared modal). */
 function openTaskDelete(taskId) {
     const item = (state.tasksPage.items || []).find((task) => task.id === taskId);
@@ -1594,8 +1609,11 @@ function buildTasksListHtml() {
             `<div class="task-tools">${(item.tools || []).map((tool) => `<span class="tool-tag">${escapeHtml(tool)}</span>`).join('')}</div>` +
             `</div>` +
             `<div class="task-actions">` +
-            `<button type="button" class="btn" data-action="task-run" data-id="${escapeHtml(item.id)}"${item.running ? ' disabled' : ''}>` +
-            `${ICONS.play}${escapeHtml(STRINGS.taskRunNow)}</button>` +
+            (item.running
+                ? `<button type="button" class="btn" data-action="task-stop" data-id="${escapeHtml(item.id)}">` +
+                  `${ICONS.stop}${escapeHtml(STRINGS.taskStop)}</button>`
+                : `<button type="button" class="btn" data-action="task-run" data-id="${escapeHtml(item.id)}">` +
+                  `${ICONS.play}${escapeHtml(STRINGS.taskRunNow)}</button>`) +
             `<button type="button" class="btn" data-action="task-log" data-id="${escapeHtml(item.id)}">${escapeHtml(STRINGS.taskLogTitle)}</button>` +
             `<button type="button" class="icon-btn" data-action="task-edit" data-id="${escapeHtml(item.id)}" ` +
             `title="${escapeHtml(STRINGS.taskEditTitle)}" aria-label="${escapeHtml(STRINGS.taskEditTitle)}">${ICONS.edit}</button>` +
@@ -2327,6 +2345,8 @@ function onRootClick(event) {
             openTaskDelete(id);
         } else if (action === 'task-run') {
             runTaskNow(id);
+        } else if (action === 'task-stop') {
+            stopTaskNow(id);
         } else if (action === 'task-log') {
             openTaskLog(id);
         } else if (action === 'task-toggle') {

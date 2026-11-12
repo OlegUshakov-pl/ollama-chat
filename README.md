@@ -291,8 +291,9 @@ The prompt commands from before still work identically:
 
 Default `-d` is `all`. Default `--tools` is `web_search,fetch_page,check_email` (adding
 `send_email` to `--tools` opts the task in to sending e-mail, see above). The default model is the
-current model. If the time-slot is skipped (app off), the task is missed-catch-up run at startup
-when the config key `tasksCatchUp` is not `false`.
+current model. If the time-slot is skipped (app off), the task is missed - by default there is no
+catch-up run at startup; set the config key `tasksCatchUp` to `true` to enable it. A running task
+can be stopped with the tasks page's stop button.
 
 ### Conversation templates
 - **Create:** `Add Template` (home) or `Template` (conversation page)
