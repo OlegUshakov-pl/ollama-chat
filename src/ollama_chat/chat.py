@@ -42,6 +42,7 @@ EMAIL_SECURITY_PROMPT = (
 
 
 # The maximum number of tool call rounds per chat response
+# The default maximum number of tool-call rounds per chat turn
 _MAX_TOOL_ROUNDS = 5
 
 # The user-message prompt appended when the tool call budget is exhausted - it forces a final answer
@@ -87,10 +88,11 @@ class _StreamTokenFilter():
 
 # The ollama chat manager class
 class ChatManager():
-    __slots__ = ('app', 'conversation_id', 'prompts', 'stop', 'think', 'files', 'search', 'email')
+    __slots__ = ('app', 'conversation_id', 'prompts', 'stop', 'think', 'files', 'search', 'email', 'tool_rounds')
 
 
-    def __init__(self, app, conversation_id, prompts, think=None, files=None, search=False, email=False):
+    def __init__(self, app, conversation_id, prompts, think=None, files=None, search=False, email=False, \
+                 tool_rounds=None):
         self.app = app
         self.conversation_id = conversation_id
         self.prompts = list(prompts)
@@ -99,6 +101,7 @@ class ChatManager():
         self.files = files or []
         self.search = search
         self.email = email
+        self.tool_rounds = _MAX_TOOL_ROUNDS if tool_rounds is None else max(1, int(tool_rounds))
 
         # Start the chat thread
         chat_thread = threading.Thread(target=self.chat_thread_fn, args=(self,))
@@ -261,7 +264,7 @@ class ChatManager():
                 tool_rounds = 0
                 while True:
                     # Offer the tools until the tool call limit is reached
-                    request_tools = tools if tools is None or tool_rounds < _MAX_TOOL_ROUNDS else None
+                    request_tools = tools if tools is None or tool_rounds < chat.tool_rounds else None
 
                     # The tool call budget was just exhausted - tell the model to wrap up instead of
                     # planning more tool calls, which models otherwise emit as raw tool-call text
@@ -328,7 +331,7 @@ class ChatManager():
                 # If the tool call limit was reached, the tools are no longer offered and the model
                 # may still answer with raw tool-call text - truncate that markup from the answer
                 # and note the limit
-                if tools is not None and tool_rounds >= _MAX_TOOL_ROUNDS:
+                if tools is not None and tool_rounds >= chat.tool_rounds:
                     match = _RE_TOOL_CALL_MARK.search(round_content)
                     if match is not None:
                         with chat.app.config() as config:

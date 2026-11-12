@@ -559,7 +559,8 @@ def start_conversation(ctx, req):
         ctx.app.chats[id_] = ChatManager(
             ctx.app, id_, [user_prompt],
             think=req.get('think', False), files=req.get('files'),
-            search=req.get('search', False), email=req.get('email', False)
+            search=req.get('search', False), email=req.get('email', False),
+            tool_rounds=req.get('toolRounds')
         )
 
         # Return the new conversation identifier
@@ -710,7 +711,8 @@ def reply_conversation(ctx, req):
         ctx.app.chats[id_] = ChatManager(
             ctx.app, id_, [req['user']],
             think=req.get('think', False), files=req.get('files'),
-            search=req.get('search', False), email=req.get('email', False)
+            search=req.get('search', False), email=req.get('email', False),
+            tool_rounds=req.get('toolRounds')
         )
 
 

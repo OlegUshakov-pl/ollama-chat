@@ -726,6 +726,9 @@ action startConversation
         # If true, let the model read emails and draft emails for user approval
         optional bool email
 
+        # The maximum number of tool-call rounds for this turn, 1-50 (default is 5)
+        optional int(>= 1, <= 50) toolRounds
+
         # Attached files [{name, type, data}] - at most 10 files
         optional ConversationFile[len <= 10] files
 
@@ -813,6 +816,9 @@ action replyConversation
 
         # If true, let the model read emails and draft emails for user approval
         optional bool email
+
+        # The maximum number of tool-call rounds for this turn, 1-50 (default is 5)
+        optional int(>= 1, <= 50) toolRounds
 
         # Attached files [{name, type, data}] - at most 10 files
         optional ConversationFile[len <= 10] files

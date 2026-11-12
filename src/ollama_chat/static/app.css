@@ -245,6 +245,8 @@ button.model-pill:hover { background: var(--accent-soft); color: var(--accent); 
 /* Active toggle states */
 .icon-btn.thinking-active, .icon-btn.websearch-active, .icon-btn.email-active { background: var(--accent); color: #fff9f3; border-color: var(--accent); }
 .icon-btn.upload-active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.icon-btn.toolrounds-active { color: var(--accent); border-color: var(--accent); }
+.icon-btn .btn-count { font-size: 10px; font-weight: 700; line-height: 1; margin-left: 1px; }
 
 /* File chips */
 .file-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 8px; }

@@ -56,6 +56,7 @@ const STRINGS = {
     thinkingOff: 'Thinking off',
     webSearchOn: 'Web search on',
     webSearchOff: 'Web search off',
+    toolRounds: 'Tool call rounds',
     emailOn: 'Email tools on',
     emailOff: 'Email tools off',
     toolsLabel: 'Tools',
@@ -196,9 +197,12 @@ const ICONS = {
     edit: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
 };
 
+/** The tool-call round limit options the composer's tool-rounds button cycles through. */
+const TOOL_ROUNDS_OPTIONS = [1, 3, 5, 10, 20];
+const TOOL_ROUNDS_DEFAULT = 5;
+
 /** Poll interval (ms) while a response is generating. */
 const POLL_MS = 400;
-
 /** Poll interval (ms) for the tasks page list refresh. */
 const TASKS_POLL_MS = 4000;
 
@@ -263,6 +267,7 @@ const state = {
     toolsOpen: {},
     webSearchEnabled: loadWebSearchEnabled(),
     emailEnabled: loadEmailEnabled(),
+    toolRounds: loadToolRounds(),
     notice: null,
     uploading: false,
     mdViewer: null,
@@ -302,6 +307,17 @@ function loadEmailEnabled() {
 
 function saveEmailEnabled(val) {
     try { window.localStorage.setItem('ollama-chat-email', String(val)); } catch (err) { /* ignore */ }
+}
+
+function loadToolRounds() {
+    try {
+        const value = Number(window.localStorage.getItem('ollama-chat-toolrounds'));
+        return TOOL_ROUNDS_OPTIONS.includes(value) ? value : TOOL_ROUNDS_DEFAULT;
+    } catch (err) { return TOOL_ROUNDS_DEFAULT; }
+}
+
+function saveToolRounds(val) {
+    try { window.localStorage.setItem('ollama-chat-toolrounds', String(val)); } catch (err) { /* ignore */ }
 }
 
 function fileExt(name) {
@@ -1861,6 +1877,8 @@ function buildComposerHtml() {
         `title="${escapeHtml(webSearchTitle)}" aria-label="${escapeHtml(webSearchTitle)}">${webSearchIcon}</button>` +
         `<button type="button" class="icon-btn${state.emailEnabled ? ' email-active' : ''}" id="email-btn" data-action="toggleEmail" ` +
         `title="${escapeHtml(emailTitle)}" aria-label="${escapeHtml(emailTitle)}">${emailIcon}</button>` +
+        `<button type="button" class="icon-btn toolrounds-btn${state.toolRounds !== TOOL_ROUNDS_DEFAULT ? ' toolrounds-active' : ''}" id="toolrounds-btn" data-action="cycleToolRounds" ` +
+        `title="${escapeHtml(`${STRINGS.toolRounds}: ${state.toolRounds}`)}" aria-label="${escapeHtml(`${STRINGS.toolRounds}: ${state.toolRounds}`)}">${ICONS.refresh}<span class="btn-count">${state.toolRounds}</span></button>` +
         `<button type="button" class="icon-btn${state.thinkingEnabled ? ' thinking-active' : ''}" id="thinking-btn" data-action="toggleThinking" ` +
         `title="${escapeHtml(thinkingTitle)}" aria-label="${escapeHtml(thinkingTitle)}">${thinkingIcon}</button>` +
         `<button type="button" class="icon-btn${uploadFiles.length ? ' upload-active' : ''}" id="upload-btn" data-action="uploadFile" ` +
@@ -2123,7 +2141,7 @@ async function submitComposer() {
                 throw new Error(STRINGS.errorNoModel);
             }
             const files = await readFilesAsData(uploadFiles);
-            const data = await apiPost('startConversation', { model, user: text, think: state.thinkingEnabled, search: state.webSearchEnabled, email: state.emailEnabled, files });
+            const data = await apiPost('startConversation', { model, user: text, think: state.thinkingEnabled, search: state.webSearchEnabled, email: state.emailEnabled, toolRounds: state.toolRounds, files });
             setDraft('');
             uploadFiles = [];
             state.sending = false;
@@ -2131,7 +2149,7 @@ async function submitComposer() {
             await refreshConversations();
         } else {
             const files = await readFilesAsData(uploadFiles);
-            await apiPost('replyConversation', { id: state.route.id, user: text, think: state.thinkingEnabled, search: state.webSearchEnabled, email: state.emailEnabled, files });
+            await apiPost('replyConversation', { id: state.route.id, user: text, think: state.thinkingEnabled, search: state.webSearchEnabled, email: state.emailEnabled, toolRounds: state.toolRounds, files });
             setDraft('');
             uploadFiles = [];
             state.sending = false;
@@ -2398,6 +2416,12 @@ function onRootClick(event) {
         } else if (action === 'toggleEmail') {
             state.emailEnabled = !state.emailEnabled;
             saveEmailEnabled(state.emailEnabled);
+            render();
+        } else if (action === 'cycleToolRounds') {
+            // Cycle through the tool-call round limit options
+            const ix = TOOL_ROUNDS_OPTIONS.indexOf(state.toolRounds);
+            state.toolRounds = TOOL_ROUNDS_OPTIONS[(ix + 1) % TOOL_ROUNDS_OPTIONS.length];
+            saveToolRounds(state.toolRounds);
             render();
         } else if (action === 'tools') {
             const toolIx = Number(actionButton.dataset.ix);
