@@ -375,6 +375,8 @@ def _task_details(task, running=False):
         details['lastError'] = task['lastError']
     if task.get('num_ctx'):
         details['numCtx'] = task['num_ctx']
+    if task.get('tool_rounds'):
+        details['toolRounds'] = task['tool_rounds']
     if running:
         details['running'] = True
     return details
@@ -399,7 +401,8 @@ def set_task(ctx, req):
             req['model'], \
             num_ctx=req.get('numCtx'), \
             tools=req['tools'], \
-            enabled=req.get('enabled', True)
+            enabled=req.get('enabled', True), \
+            tool_rounds=req.get('toolRounds')
         )
     except ValueError as exc:
         raise chisel.ActionError('BadTask', str(exc)) from None

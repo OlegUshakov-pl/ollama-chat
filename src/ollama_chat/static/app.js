@@ -142,6 +142,9 @@ const STRINGS = {
     taskModelLabel: 'Model',
     taskNumCtxLabel: 'Context size (num_ctx)',
     taskNumCtxHint: 'Leave empty for the default context size.',
+    taskToolRoundsLabel: 'Tool call rounds',
+    taskToolRoundsHint: 'How many web/email tool rounds the task may use. Default is 5.',
+    taskDefaultLabel: 'default',
     taskToolsLabel: 'Allowed tools',
     sendEmailDefaultOff: 'off by default - a task sending email is not confirmed by anyone',
     taskEnabledLabel: 'Enabled',
@@ -935,6 +938,7 @@ function openTaskForm(task) {
             prompt: task.prompt || '',
             model: task.model || '',
             numCtx: task.numCtx != null ? String(task.numCtx) : '',
+            toolRounds: task.toolRounds != null ? String(task.toolRounds) : '',
             tools: new Set(task.tools || []),
             enabled: task.enabled !== false,
             error: null,
@@ -948,6 +952,7 @@ function openTaskForm(task) {
             prompt: '',
             model: '',
             numCtx: '',
+            toolRounds: '',
             tools: new Set(['web_search', 'fetch_page', 'check_email']),
             enabled: true,
             error: null,
@@ -966,6 +971,7 @@ async function submitTaskForm() {
     const time = input('task-time');
     const prompt = document.getElementById('task-prompt') ? document.getElementById('task-prompt').value : '';
     const numCtx = input('task-numctx');
+    const toolRounds = input('task-toolrounds');
     if (!name || !form.days.size) {
         form.error = !name ? `${STRINGS.taskNameLabel}: required` : `${STRINGS.taskDaysLabel}: required`;
         render();
@@ -987,6 +993,9 @@ async function submitTaskForm() {
     }
     if (numCtx) {
         body.numCtx = Number(numCtx);
+    }
+    if (toolRounds) {
+        body.toolRounds = Number(toolRounds);
     }
     body.enabled = form.enabled;
     try {
@@ -1640,6 +1649,21 @@ function buildTasksListHtml() {
     }).join('');
 }
 
+/** The task form's tool-call round limit select - "default" (5) or an explicit value. */
+function buildToolRoundsSelect(selected) {
+    const options = [...TOOL_ROUNDS_OPTIONS];
+    if (selected && !options.includes(Number(selected))) {
+        options.push(Number(selected));
+        options.sort((a, b) => a - b);
+    }
+    const optionHtml = options.map((value) =>
+        `<option value="${value}"${Number(selected) === value ? ' selected' : ''}>${value}</option>`
+    ).join('');
+    return `<select id="task-toolrounds">` +
+        `<option value=""${selected ? '' : ' selected'}>${TOOL_ROUNDS_DEFAULT} (${escapeHtml(STRINGS.taskDefaultLabel)})</option>` +
+        optionHtml + `</select>`;
+}
+
 function buildTaskFormHtml() {
     const form = state.taskForm;
     if (!form) {
@@ -1698,6 +1722,9 @@ function buildTaskFormHtml() {
         `<input id="task-numctx" type="number" min="128" step="128" value="${escapeHtml(form.numCtx)}" placeholder="default">` +
         `<span class="form-hint">${escapeHtml(STRINGS.taskNumCtxHint)}</span></label>` +
         `</div>` +
+        `<label class="form-field" for="task-toolrounds"><span>${escapeHtml(STRINGS.taskToolRoundsLabel)}</span>` +
+        buildToolRoundsSelect(form.toolRounds) +
+        `<span class="form-hint">${escapeHtml(STRINGS.taskToolRoundsHint)}</span></label>` +
         `<div class="form-field"><span>${escapeHtml(STRINGS.taskToolsLabel)}</span><div class="tools-list">${toolChecks}</div>` +
         `<span class="form-hint">${escapeHtml(STRINGS.toolsTaskSendEmail)} - ${escapeHtml(STRINGS.sendEmailDefaultOff)}</span></div>` +
         `<label class="check-row"><input type="checkbox" id="task-enabled"${form.enabled ? ' checked' : ''}>` +

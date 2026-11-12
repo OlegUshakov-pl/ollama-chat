@@ -458,6 +458,26 @@ class TestRunTask(unittest.TestCase):
                 self.assertIn('final answer', final_messages[-1]['content'])
 
 
+    def test_run_task_tool_rounds_per_task(self):
+        # The task's own tool_rounds limit caps the tool-call rounds (default is 5)
+        with create_test_files([]) as temp_dir:
+            ensure_workspace(temp_dir)
+            task = dict(TEST_TASK, tool_rounds=1)  # tools: web_search, fetch_page
+            tool_call = {'function': {'name': 'web_search', 'arguments': {'query': 'q'}}}
+            rounds = [
+                [{'message': {'content': 'searching', 'tool_calls': [tool_call]}}],
+                [{'message': {'content': 'The report after one search.'}}]
+            ]
+            with mock_ollama(rounds, capabilities=['tools']) as (mock_chat, _mock_show):
+                with unittest.mock.patch( \
+                    'ollama_chat.chat._run_tool', return_value=('tool result', {'action': 'search', 'value': 'q'}) \
+                ):
+                    report = _run_task(unittest.mock.sentinel.pool, temp_dir, task)
+            self.assertEqual(report, 'The report after one search.')
+            # The second round has no tools - the task's limit is reached
+            chat_calls = [call for call in mock_chat.call_args_list if call.kwargs.get('tools') is not None]
+            self.assertEqual(len(chat_calls), 1)
+
     def test_run_task_no_tools_capability(self):
         with create_test_files([]) as temp_dir:
             ensure_workspace(temp_dir)
@@ -533,6 +553,31 @@ class TestTaskUpsertAndLog(unittest.TestCase):
             self.assertIsNone(task['lastRun'])
             saved = load_tasks(temp_dir)[0]
             self.assertEqual(saved['id'], 'briefing')
+
+
+    def test_task_upsert_tool_rounds(self):
+        with create_test_files([]) as temp_dir:
+            task = task_upsert( \
+                temp_dir, None, 'Briefing', parse_task_time('9:15'), [1], 'Make a report', 'llm', \
+                tools='web_search', tool_rounds='10' \
+            )
+            self.assertEqual(task['tool_rounds'], 10)
+
+            # An out-of-range or non-numeric limit is rejected
+            self.assertRaises( \
+                ValueError, task_upsert, temp_dir, 'briefing', 'Briefing', parse_task_time('9:15'), \
+                [1], 'Make a report', 'llm', tools='web_search', tool_rounds='51' \
+            )
+            self.assertRaises( \
+                ValueError, task_upsert, temp_dir, 'briefing', 'Briefing', parse_task_time('9:15'), \
+                [1], 'Make a report', 'llm', tools='web_search', tool_rounds='abc' \
+            )
+            # An empty limit resets to the default (None)
+            task = task_upsert( \
+                temp_dir, 'briefing', 'Briefing', parse_task_time('9:15'), [1], 'Make a report', 'llm', \
+                tools='web_search', tool_rounds='' \
+            )
+            self.assertIsNone(task['tool_rounds'])
 
 
     def test_task_upsert_update_keeps_last_run(self):

@@ -685,7 +685,7 @@ class TestAPI(unittest.TestCase):
                 'POST', '/setTask', \
                 wsgi_input=json.dumps({ \
                     'name': 'T', 'time': '09:00', 'days': [1], 'model': 'llm', 'prompt': 'p', \
-                    'numCtx': 4096, 'tools': ['web_search'] \
+                    'numCtx': 4096, 'toolRounds': 10, 'tools': ['web_search'] \
                 }).encode('utf-8') \
             )
 
@@ -696,7 +696,7 @@ class TestAPI(unittest.TestCase):
                 response['tasks'], \
                 [{
                     'id': 't', 'name': 'T', 'time': '09:00', 'days': [1], 'model': 'llm',
-                    'prompt': 'p', 'numCtx': 4096, 'tools': ['web_search'], 'enabled': True
+                    'prompt': 'p', 'numCtx': 4096, 'toolRounds': 10, 'tools': ['web_search'], 'enabled': True
                 }]
             )
 

@@ -58,6 +58,9 @@ struct TaskDetails (TaskInfo)
     # The context size (num_ctx), or null for default
     optional int numCtx
 
+    # The maximum number of tool-call rounds, 1-50, or null for the default (5)
+    optional int(>= 1, <= 50) toolRounds
+
     # The allowed tools
     string[] tools
 
@@ -89,6 +92,9 @@ struct TaskInput
 
     # The context size (num_ctx), or null for default
     optional int numCtx
+
+    # The maximum number of tool-call rounds, 1-50, or null for the default (5)
+    optional int(>= 1, <= 50) toolRounds
 
     # The allowed tools
     string[] tools

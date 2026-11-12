@@ -185,7 +185,8 @@ def task_add(workspace, name, run_time, days, prompt, model, num_ctx=None, tools
 # Create or update a task, for the tasks page's setTask endpoint. Creates a new task when
 # task_id is None; otherwise updates the task - keeping its lastRun/lastError. All form fields
 # are required. Returns the stored task dict, raising ValueError on bad field values.
-def task_upsert(workspace, task_id, name, run_time, days, prompt, model, num_ctx=None, tools=None, enabled=True):
+def task_upsert(workspace, task_id, name, run_time, days, prompt, model, num_ctx=None, tools=None, enabled=True, \
+                tool_rounds=None):
     tasks = load_tasks(workspace)
     normalized_name = str(name or '').strip()
     if not normalized_name:
@@ -203,6 +204,7 @@ def task_upsert(workspace, task_id, name, run_time, days, prompt, model, num_ctx
         raise ValueError('the task model must not be empty')
 
     num_ctx = _task_num_ctx(num_ctx)
+    tool_rounds = _task_tool_rounds(tool_rounds)
     if task is not None:
         task.update({
             'name': normalized_name,
@@ -211,6 +213,7 @@ def task_upsert(workspace, task_id, name, run_time, days, prompt, model, num_ctx
             'prompt': str(prompt or ''),
             'model': model_name,
             'num_ctx': num_ctx,
+            'tool_rounds': tool_rounds,
             'tools': tool_names,
             'enabled': bool(enabled or enabled is None),
         })
@@ -223,6 +226,7 @@ def task_upsert(workspace, task_id, name, run_time, days, prompt, model, num_ctx
             'prompt': str(prompt or ''),
             'model': model_name,
             'num_ctx': num_ctx,
+            'tool_rounds': tool_rounds,
             'tools': tool_names,
             'dest': 'daily',
             'enabled': bool(enabled or enabled is None),
@@ -245,6 +249,19 @@ def _task_num_ctx(num_ctx):
     if num_ctx <= 0:
         raise ValueError(f'invalid num_ctx "{num_ctx}"')
     return num_ctx
+
+
+# A task's tool-call round limit, as stored in tasks.json - None (default), or 1-50
+def _task_tool_rounds(tool_rounds):
+    if tool_rounds is None or tool_rounds == '':
+        return None
+    try:
+        tool_rounds = int(tool_rounds)
+    except (TypeError, ValueError):
+        raise ValueError(f'invalid tool_rounds "{tool_rounds}"') from None
+    if not 1 <= tool_rounds <= 50:
+        raise ValueError(f'invalid tool_rounds "{tool_rounds}"')
+    return tool_rounds
 
 
 # Remove a task from the workspace's task list by ID
@@ -349,12 +366,16 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
     )
     tool_rounds = 0
     final_attempts = 0
+    # The task's tool-call round limit (default 5) - tolerate a bad stored value
+    task_tool_rounds = task.get('tool_rounds')
+    max_tool_rounds = task_tool_rounds if isinstance(task_tool_rounds, int) and task_tool_rounds >= 1 \
+        else _MAX_TOOL_ROUNDS
     while True:
         # Stopped by the user?
         if stop is not None and stop.is_set():
             raise ValueError('the task was stopped')
 
-        round_tools = request_tools if request_tools is None or tool_rounds < _MAX_TOOL_ROUNDS else None
+        round_tools = request_tools if request_tools is None or tool_rounds < max_tool_rounds else None
 
         # The tool call budget was just exhausted - tell the model to write its final answer now,
         # instead of planning more tool calls. Some models (e.g. MiMo) keep emitting tool calls
