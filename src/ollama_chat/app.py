@@ -430,7 +430,8 @@ def set_task(ctx, req):
             num_ctx=req.get('numCtx'), \
             tools=req['tools'], \
             enabled=req.get('enabled', True), \
-            tool_rounds=req.get('toolRounds')
+            tool_rounds=req.get('toolRounds'), \
+            provider=req.get('provider')
         )
     except ValueError as exc:
         raise chisel.ActionError('BadTask', str(exc)) from None

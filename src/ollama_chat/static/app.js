@@ -1104,7 +1104,7 @@ function openTaskForm(task) {
             time: '09:00',
             days: new Set([1, 2, 3, 4, 5, 6, 7]),
             prompt: '',
-            model: '',
+            model: state.selectedModel || '',
             numCtx: '',
             toolRounds: '',
             tools: new Set(['web_search', 'fetch_page', 'check_email']),
@@ -1138,7 +1138,8 @@ async function submitTaskForm() {
         name,
         time,
         days: [...form.days],
-        model: (document.getElementById('task-model') ? document.getElementById('task-model').value : '') || form.model || composerModel() || '',
+        model: form.model || state.selectedModel || composerModel() || '',
+        provider: state.selectedProvider || undefined,
         prompt,
         tools: [...form.tools],
     };
@@ -1946,21 +1947,6 @@ function buildTaskFormHtml() {
             `<input type="checkbox" data-tool="${escapeHtml(tool)}"${checked ? ' checked' : ''}>` +
             `<span>${escapeHtml(toolLabels[tool] || tool)}</span></label>`;
     }).join('');
-    const models = (state.models && state.models.list) || [];
-    const modelOptions = models.map((model) => {
-        const selected = model.id === form.model ? ' selected' : '';
-        return `<option value="${escapeHtml(model.id)}"${selected}>${escapeHtml(model.id)}</option>`;
-    }).join('');
-    const modelSelect = modelOptions
-        ? (form.model && !models.some((model) => model.id === form.model)
-            ? `<option value="${escapeHtml(form.model)}" selected>${escapeHtml(form.model)}</option>` + modelOptions
-            : modelOptions)
-        : (() => {
-              const fallback = form.model
-                  ? `<option value="${escapeHtml(form.model)}" selected>${escapeHtml(form.model)}</option>`
-                  : `<option value="">${escapeHtml(STRINGS.noModels)}</option>`;
-              return fallback;
-          })();
     return `<div class="modal-overlay" id="modal-overlay">` +
         `<div class="modal modal-wide" role="dialog" aria-modal="true" aria-label="${escapeHtml(form.id ? STRINGS.taskEditTitle : STRINGS.taskNewTitle)}">` +
         `<h2>${escapeHtml(form.id ? STRINGS.taskEditTitle : STRINGS.taskNewTitle)}</h2>` +
@@ -1975,8 +1961,8 @@ function buildTaskFormHtml() {
         `<label class="form-field form-row-wide" for="task-prompt"><span>${escapeHtml(STRINGS.taskPromptLabel)}</span>` +
         `<textarea id="task-prompt" rows="4">${escapeHtml(form.prompt)}</textarea></label>` +
         `<div class="form-grid">` +
-        `<label class="form-field" for="task-model"><span>${escapeHtml(STRINGS.taskModelLabel)}</span>` +
-        `<select id="task-model">${modelSelect}</select></label>` +
+        `<div class="form-field"><span>${escapeHtml(STRINGS.taskModelLabel)}</span>` +
+        `<div class="model-pill" style="margin-top:0.25rem;"><span class="model-name">${escapeHtml(state.selectedModel || STRINGS.noModels)}</span></div></div>` +
         `<label class="form-field" for="task-numctx"><span>${escapeHtml(STRINGS.taskNumCtxLabel)}</span>` +
         `<input id="task-numctx" type="number" min="128" step="128" value="${escapeHtml(form.numCtx)}" placeholder="default">` +
         `<span class="form-hint">${escapeHtml(STRINGS.taskNumCtxHint)}</span></label>` +

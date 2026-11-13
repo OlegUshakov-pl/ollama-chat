@@ -186,7 +186,7 @@ def task_add(workspace, name, run_time, days, prompt, model, num_ctx=None, tools
 # task_id is None; otherwise updates the task - keeping its lastRun/lastError. All form fields
 # are required. Returns the stored task dict, raising ValueError on bad field values.
 def task_upsert(workspace, task_id, name, run_time, days, prompt, model, num_ctx=None, tools=None, enabled=True, \
-                tool_rounds=None):
+                tool_rounds=None, provider=None):
     tasks = load_tasks(workspace)
     normalized_name = str(name or '').strip()
     if not normalized_name:
@@ -205,6 +205,9 @@ def task_upsert(workspace, task_id, name, run_time, days, prompt, model, num_ctx
 
     num_ctx = _task_num_ctx(num_ctx)
     tool_rounds = _task_tool_rounds(tool_rounds)
+    # Keep an explicitly passed provider; otherwise preserve the existing one on update
+    if provider is None and task is not None:
+        provider = task.get('provider')
     if task is not None:
         task.update({
             'name': normalized_name,
@@ -212,6 +215,7 @@ def task_upsert(workspace, task_id, name, run_time, days, prompt, model, num_ctx
             'days': sorted(days),
             'prompt': str(prompt or ''),
             'model': model_name,
+            'provider': provider,
             'num_ctx': num_ctx,
             'tool_rounds': tool_rounds,
             'tools': tool_names,
@@ -225,6 +229,7 @@ def task_upsert(workspace, task_id, name, run_time, days, prompt, model, num_ctx
             'days': sorted(days),
             'prompt': str(prompt or ''),
             'model': model_name,
+            'provider': provider,
             'num_ctx': num_ctx,
             'tool_rounds': tool_rounds,
             'tools': tool_names,
@@ -347,9 +352,7 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
         raise ValueError(f'task "{task["id"]}" has no model')
 
     # The task's provider - old tasks have no provider and fall back to local Ollama
-    provider = create_provider(task.get('provider'), pool_manager)
-
-    # The messages - workspace memory context plus the task prompt
+    provider = create_provider(task.get('provider'), pool_manager, crypto=getattr(pool_manager, 'crypto', None))    # The messages - workspace memory context plus the task prompt
     prompt = str(task.get('prompt') or '')
     messages = []
     memory_text = memory_context(workspace, prompt, memory_limit)
@@ -500,6 +503,11 @@ class TaskManager():
 
     def __init__(self, app):
         self.app = app
+        # Carry the app's crypto on the pool manager so provider adapters can decrypt keys
+        try:
+            self.app.pool_manager.crypto = self.app.crypto
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
         self.started = False
         self.running = set()
         self.running_lock = threading.Lock()

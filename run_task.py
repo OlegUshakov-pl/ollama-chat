@@ -65,6 +65,8 @@ def main(argv=None):
     # Run the task
     workspace = str(workspace_dir(config))
     pool_manager = urllib3.PoolManager(num_pools=10, maxsize=10)
+    from ollama_chat.providers.crypto import CryptoManager  # noqa: E402
+    pool_manager.crypto = CryptoManager(config_path)
     try:
         report = run_stored_task(workspace, pool_manager, args.id)
     except ValueError as exc:
