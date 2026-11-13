@@ -390,3 +390,8 @@ make run ARGS='...'  # start app from default venv
 ```
 
 Upstream: https://github.com/craigahobbs/ollama-chat · Fork: https://github.com/OlegUshakov-pl/ollama-chat
+
+![general](assets/General.png)
+![Settings](assets/Settings.png)
+![ai](assets/AI.png)
+![ai](assets/Tasks.png)
