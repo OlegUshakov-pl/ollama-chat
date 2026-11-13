@@ -589,13 +589,14 @@ async function loadSettings() {
         if (!state.selectedProvider && state.providers.list.length) {
             state.selectedProvider = state.providers.list[0].id;
         }
-        // Fetch cached model lists for each provider (best effort)
-        for (const p of state.providers.list) {
+        // Fetch the selected provider's model list only (best effort) - other providers'
+        // models are loaded lazily when the user selects them, so opening settings is fast
+        if (state.selectedProvider) {
             try {
-                const md = await apiGet('getProviderModels', 'provider=' + encodeURIComponent(p.id));
-                state.providers.models[p.id] = (md && md.models) || [];
+                const md = await apiGet('getProviderModels', 'provider=' + encodeURIComponent(state.selectedProvider));
+                state.providers.models[state.selectedProvider] = (md && md.models) || [];
             } catch (e) {
-                state.providers.models[p.id] = [];
+                state.providers.models[state.selectedProvider] = [];
             }
         }
     } catch (err) {
@@ -2638,6 +2639,18 @@ function onRootClick(event) {
             state.selectedProvider = id;
             if (!state.providerForms[id]) state.providerForms[id] = { apiKey: '', showKey: false, keyStatus: 'unchecked' };
             render();
+            // Load this provider's model list lazily if it hasn't been loaded yet
+            if (state.providers.models[id] === undefined) {
+                (async () => {
+                    try {
+                        const md = await apiGet('getProviderModels', 'provider=' + encodeURIComponent(id));
+                        state.providers.models[id] = (md && md.models) || [];
+                    } catch (e) {
+                        state.providers.models[id] = [];
+                    }
+                    render();
+                })();
+            }
         } else if (action === 'toggleKey') {
             if (!state.providerForms[id]) state.providerForms[id] = { apiKey: '', showKey: false, keyStatus: 'unchecked' };
             state.providerForms[id].showKey = !state.providerForms[id].showKey;
