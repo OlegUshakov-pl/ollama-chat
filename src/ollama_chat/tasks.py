@@ -346,23 +346,26 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
 
     now = datetime.datetime.now() if now is None else now
 
-    # The model
-    model = task.get('model')
-    if not model:
-        raise ValueError(f'task "{task["id"]}" has no model')
-
-    # The task's provider - old tasks have no provider and fall back to local Ollama.
-    # Resolve the provider's config entry from the app (when available) so cloud providers
-    # keep their base URL and encrypted API key.
-    provider_id = task.get('provider')
+    # The model and provider come from the settings (config) when available, so a task always
+    # follows the currently selected model/provider instead of a stale value saved with it.
     app = getattr(pool_manager, 'app', None)
+    config_model = None
+    config_provider = None
     if app is not None:
         with app.config() as config:
+            config_model = config.get('model')
+            config_provider = config.get('provider')
+            provider_id = config_provider or task.get('provider')
             provider_entry = provider_config(config, provider_id)
         crypto = getattr(app, 'crypto', None) or getattr(pool_manager, 'crypto', None)
     else:
+        provider_id = task.get('provider')
         provider_entry = provider_config({}, provider_id)
         crypto = getattr(pool_manager, 'crypto', None)
+    model = config_model or task.get('model')
+    if not model:
+        raise ValueError(f'task "{task["id"]}" has no model')
+
     provider = create_provider(provider_id, pool_manager, provider_entry, crypto=crypto)    # The messages - workspace memory context plus the task prompt
     prompt = str(task.get('prompt') or '')
     messages = []

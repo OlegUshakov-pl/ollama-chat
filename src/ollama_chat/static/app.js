@@ -1888,7 +1888,7 @@ function buildTasksListHtml() {
             `<span class="task-schedule">${escapeHtml(item.time || '')} · ${escapeHtml(taskDaysText(item.days))}</span>` +
             `</div>` +
             `<div class="task-meta">` +
-            `<span>${escapeHtml(item.model || '')}</span>` +
+            `<span>${escapeHtml(state.selectedModel || item.model || '')}</span>` +
             (item.lastRun ? `<span>· ${escapeHtml(STRINGS.taskLastRun)}: ${escapeHtml(item.lastRun)}</span>` : '') +
             (item.lastError ? `<span class="status-err">· ✖ ${escapeHtml(item.lastError)}</span>` : '') +
             (item.running ? `<span class="task-running">${escapeHtml(STRINGS.taskRunning)}</span>` : '') +
