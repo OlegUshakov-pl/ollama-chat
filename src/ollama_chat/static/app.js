@@ -276,6 +276,7 @@ const state = {
     mdViewer: null,
     workspace: null,
     settings: { loading: false, error: null, data: null, saving: false, test: null, notice: null, savingEmail: false },
+    providers: { loading: false, error: null, list: [], models: {}, saving: {}, testing: {}, notice: null },
     profile: { loading: false, error: null, data: null, saving: false, notice: null, values: {}, mode: 'form' },
     tasksPage: { loading: false, error: null, items: null, timer: null },
     taskForm: null,
@@ -565,6 +566,7 @@ async function exportCurrentChatPdf() {
 
 async function loadSettings() {
     state.settings = { ...state.settings, loading: true, error: null, test: null, notice: null };
+    state.providers = { ...state.providers, loading: true, error: null };
     render();
     try {
         const data = await apiGet('getSettings');
@@ -574,6 +576,23 @@ async function loadSettings() {
     } catch (err) {
         state.settings.loading = false;
         state.settings.error = err.message;
+    }
+    try {
+        const pdata = await apiGet('getProviders');
+        state.providers.list = (pdata && pdata.providers) || [];
+        state.providers.loading = false;
+        // Fetch cached model lists for each provider (best effort)
+        for (const p of state.providers.list) {
+            try {
+                const md = await apiGet('getProviderModels', 'provider=' + encodeURIComponent(p.id));
+                state.providers.models[p.id] = (md && md.models) || [];
+            } catch (e) {
+                state.providers.models[p.id] = [];
+            }
+        }
+    } catch (err) {
+        state.providers.loading = false;
+        state.providers.error = err.message;
     }
     render();
 }
@@ -639,6 +658,91 @@ async function submitEmailSettings() {
             state.settings.savingEmail = false;
             state.settings.error = err.message;
         }
+    }
+    render();
+}
+
+async function toggleProviderEnabled(id, enabled) {
+    state.providers.saving[id] = true;
+    render();
+    try {
+        await apiPost('saveProvider', { id, enabled });
+        const pdata = await apiGet('getProviders');
+        state.providers.list = (pdata && pdata.providers) || [];
+    } catch (err) {
+        state.providers.error = err.message;
+    }
+    state.providers.saving[id] = false;
+    render();
+}
+
+async function saveProviderCard(id) {
+    const urlInput = document.getElementById('prov-url-' + id);
+    const keyInput = document.getElementById('prov-key-' + id);
+    const modelSelect = document.getElementById('prov-model-' + id);
+    const body = { id };
+    if (urlInput) body.baseUrl = urlInput.value.trim();
+    const key = keyInput ? keyInput.value : '';
+    if (key) body.apiKey = key;
+    if (modelSelect) body.defaultModel = modelSelect.value;
+    state.providers.saving[id] = true;
+    render();
+    try {
+        await apiPost('saveProvider', body);
+        const pdata = await apiGet('getProviders');
+        state.providers.list = (pdata && pdata.providers) || [];
+        state.providers.notice = 'Saved';
+    } catch (err) {
+        state.providers.error = err.message;
+    }
+    state.providers.saving[id] = false;
+    render();
+}
+
+async function testProviderCard(id) {
+    state.providers.testing[id] = true;
+    render();
+    try {
+        const data = await apiPost('testProvider', { id });
+        state.providers.notice = (data && data.message) || 'OK';
+    } catch (err) {
+        state.providers.error = err.message;
+    }
+    state.providers.testing[id] = false;
+    render();
+}
+
+async function refreshProviderModels(id) {
+    try {
+        const data = await apiGet('getProviderModels', 'provider=' + encodeURIComponent(id) + '&refresh=true');
+        state.providers.models[id] = (data && data.models) || [];
+    } catch (err) {
+        state.providers.error = err.message;
+    }
+    render();
+}
+
+async function deleteProviderCard(id) {
+    if (!confirm('Delete this provider?')) return;
+    try {
+        await apiPost('deleteProvider', { id });
+        const pdata = await apiGet('getProviders');
+        state.providers.list = (pdata && pdata.providers) || [];
+    } catch (err) {
+        state.providers.error = err.message;
+    }
+    render();
+}
+
+async function addCustomProvider() {
+    const name = prompt('Provider name:');
+    if (!name) return;
+    try {
+        const data = await apiPost('saveProvider', { name, baseUrl: 'https://', enabled: true });
+        const pdata = await apiGet('getProviders');
+        state.providers.list = (pdata && pdata.providers) || [];
+    } catch (err) {
+        state.providers.error = err.message;
     }
     render();
 }
@@ -1524,7 +1628,54 @@ function buildSettingsHtml() {
     if (form.notice) {
         banners += `<div class="notice-banner" role="status">${escapeHtml(form.notice)}</div>`;
     }
-    return buildPageHtml(STRINGS.settingsHeading, banners + workspaceHtml + gmailHtml);
+    const providersHtml = buildProvidersHtml();
+    return buildPageHtml(STRINGS.settingsHeading, banners + workspaceHtml + gmailHtml + providersHtml);
+}
+
+function buildProvidersHtml() {
+    const ps = state.providers;
+    let inner = `<section class="panel"><h2>AI Providers</h2>`;
+    if (ps.loading) {
+        inner += `<p class="page-status">${escapeHtml(STRINGS.loading)}</p></section>`;
+        return inner;
+    }
+    if (ps.error) {
+        inner += `<div class="error-banner" role="alert">${escapeHtml(ps.error)}</div></section>`;
+        return inner;
+    }
+    const list = ps.list || [];
+    for (const p of list) {
+        const pid = p.id;
+        const enabled = !!p.enabled;
+        const hasKey = !!p.hasApiKey;
+        const baseUrl = p.baseUrl || p.defaultBaseUrl || '';
+        const defaultModel = p.defaultModel || '';
+        const models = ps.models[pid] || [];
+        const testing = !!ps.testing[pid];
+        const saving = !!ps.saving[pid];
+        const modelOptions = models.map((m) => `<option value="${escapeHtml(m)}"${m === defaultModel ? ' selected' : ''}>${escapeHtml(m)}</option>`).join('');
+        inner +=
+            `<div class="provider-card" data-provider="${escapeHtml(pid)}" style="margin-bottom:1rem;padding:0.75rem;border:1px solid var(--border,#ccc);border-radius:6px;">` +
+            `<div style="display:flex;justify-content:space-between;align-items:center;">` +
+            `<strong>${escapeHtml(p.name || pid)}</strong>` +
+            `<label><input type="checkbox" data-action="toggleProvider" data-id="${escapeHtml(pid)}"${enabled ? ' checked' : ''}> Enabled</label>` +
+            `</div>` +
+            `<div class="form-grid" style="margin-top:0.5rem;">` +
+            `<label class="form-field"><span>Base URL</span><input id="prov-url-${escapeHtml(pid)}" type="text" value="${escapeHtml(baseUrl)}" spellcheck="false"></label>` +
+            `<label class="form-field"><span>API Key${hasKey ? ' (set)' : ''}</span><input id="prov-key-${escapeHtml(pid)}" type="password" placeholder="${hasKey ? '•••• (leave empty to keep)' : ''}"></label>` +
+            `<label class="form-field"><span>Default model</span><select id="prov-model-${escapeHtml(pid)}"><option value="">${escapeHtml(STRINGS.selectModel)}</option>${modelOptions}</select></label>` +
+            `</div>` +
+            `<div class="panel-actions" style="margin-top:0.5rem;">` +
+            `<button type="button" class="btn btn-primary" data-action="saveProvider" data-id="${escapeHtml(pid)}"${saving ? ' disabled' : ''}>Save</button>` +
+            `<button type="button" class="btn" data-action="testProvider" data-id="${escapeHtml(pid)}"${testing ? ' disabled' : ''}>${testing ? 'Testing…' : 'Test'}</button>` +
+            `<button type="button" class="btn" data-action="refreshProviderModels" data-id="${escapeHtml(pid)}">Refresh models</button>` +
+            (p.builtIn ? '' : `<button type="button" class="btn btn-danger" data-action="deleteProvider" data-id="${escapeHtml(pid)}">Delete</button>`) +
+            `</div>` +
+            `</div>`;
+    }
+    inner += `<div class="panel-actions"><button type="button" class="btn" data-action="addCustomProvider">Add Custom provider</button></div>`;
+    inner += `</section>`;
+    return inner;
 }
 
 /** A profile form field's HTML (single-line inputs; "Other" is a multi-line text area). */
@@ -2374,6 +2525,18 @@ function onRootClick(event) {
             submitEmailSettings();
         } else if (action === 'testConnection') {
             testConnection();
+        } else if (action === 'toggleProvider') {
+            toggleProviderEnabled(id, actionButton.checked);
+        } else if (action === 'saveProvider') {
+            saveProviderCard(id);
+        } else if (action === 'testProvider') {
+            testProviderCard(id);
+        } else if (action === 'refreshProviderModels') {
+            refreshProviderModels(id);
+        } else if (action === 'deleteProvider') {
+            deleteProviderCard(id);
+        } else if (action === 'addCustomProvider') {
+            addCustomProvider();
         } else if (action === 'reloadProfile') {
             loadProfile();
         } else if (action === 'profile-mode') {
