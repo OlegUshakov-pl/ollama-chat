@@ -25,7 +25,8 @@ from .memory import ( # pylint: disable=unused-import
     time_context, workspace_dir
 )
 from .email_tools import EMAIL_CHECK_LIMIT_MAX, EMAIL_TOOLS, check_email, send_email as smtp_send_email
-from .ollama import ollama_chat, ollama_show
+from .providers.base import ProviderError
+from .providers.registry import DEFAULT_PROVIDER_ID, create_provider, provider_config
 from .web_tools import SEARCH_MAX_RESULTS, WEB_TOOLS, fetch_page, web_search
 
 
@@ -127,12 +128,29 @@ class ChatManager():
                     conversation['exchanges'].append({'user': chat.prompts[0], 'model': ''})
                     del chat.prompts[0]
 
+                    # The conversation's provider - old conversations have no provider and
+                    # fall back to local Ollama. A deleted or disabled provider fails with a
+                    # message that asks the user to select another model.
+                    provider_id = conversation.get('provider') or DEFAULT_PROVIDER_ID
+                    provider_entry = provider_config(config, provider_id)
+                    if provider_entry is not None and not provider_entry.get('enabled', True):
+                        raise ProviderError( \
+                            'ProviderDisabled', \
+                            f'The provider "{provider_entry["name"]}" is disabled - select another model in the chat.' \
+                        )
+                    if provider_entry is None:
+                        raise ProviderError( \
+                            'UnknownProvider', \
+                            f'The provider "{provider_id}" was deleted - select another model in the chat.' \
+                        )
+                    provider = create_provider(provider_id, chat.app.pool_manager, provider_entry, crypto=chat.app.crypto)
+
                     # Enable the tools if the model supports tool calling
-                    model_show = None
+                    capabilities = None
                     tools = None
                     if chat.search or chat.email:
-                        model_show = ollama_show(chat.app.pool_manager, model)
-                        if 'tools' in (model_show.get('capabilities') or []):
+                        capabilities = provider.model_capabilities(model)
+                        if capabilities.get('tools'):
                             tools = []
                             if chat.search:
                                 tools.extend(WEB_TOOLS)
@@ -276,9 +294,9 @@ class ChatManager():
                     tool_calls = []
                     content_filter = _StreamTokenFilter()
                     thinking_filter = _StreamTokenFilter()
-                    for chunk in ollama_chat(
-                        chat.app.pool_manager, model, messages,
-                        think=chat.think, tools=request_tools, model_show=model_show
+                    for chunk in provider.chat_stream(
+                        model, messages,
+                        think=chat.think, tools=request_tools, capabilities=capabilities
                     ):
                         if chat.stop:
                             break

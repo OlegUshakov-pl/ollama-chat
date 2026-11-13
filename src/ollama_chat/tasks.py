@@ -18,7 +18,7 @@ import types
 import uuid
 
 from .memory import MEMORY_LIMIT_DEFAULT, memory_context, workspace_dir
-from .ollama import ollama_chat, ollama_show
+from .providers.registry import create_provider
 
 
 # The tools a scheduled task may have in its tools list. The read-only tools are the default;
@@ -346,6 +346,9 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
     if not model:
         raise ValueError(f'task "{task["id"]}" has no model')
 
+    # The task's provider - old tasks have no provider and fall back to local Ollama
+    provider = create_provider(task.get('provider'), pool_manager)
+
     # The messages - workspace memory context plus the task prompt
     prompt = str(task.get('prompt') or '')
     messages = []
@@ -354,8 +357,15 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
         messages.append({'role': 'system', 'content': memory_text})
     messages.append({'role': 'user', 'content': prompt})
 
-    # The task's allowed tools (read-only tools only) - unused when the model can't tool-call
-    request_tools = _task_tool_list(pool_manager, model, task.get('tools') or [])
+    # The task's allowed tools (read-only tools only) - unused when the model can't tool-call.
+    # The model capabilities fetch (an /api/show request for Ollama) happens only when the task
+    # has tools and is shared with chat_stream.
+    capabilities = None
+    request_tools = None
+    task_tool_names = [tool for tool in (task.get('tools') or []) if tool in TASK_TOOLS]
+    if task_tool_names:
+        capabilities = provider.model_capabilities(model)
+        request_tools = _task_tool_list(capabilities, task_tool_names)
 
     # Generate the report using the chat tool-calling loop. The chat shim allows send_email
     # only when the task's tools explicitly include it - otherwise chat.py's send_email flow
@@ -387,8 +397,9 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
         content_filter = _StreamTokenFilter()
         round_content = ''
         tool_calls = []
-        for chunk in ollama_chat( \
-            pool_manager, model, messages, think=False, tools=round_tools, num_ctx=task.get('num_ctx') \
+        for chunk in provider.chat_stream( \
+            model, messages, think=False, tools=round_tools, num_ctx=task.get('num_ctx'), \
+            capabilities=capabilities \
         ):
             # Stopped by the user?
             if stop is not None and stop.is_set():
@@ -424,13 +435,10 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
         final_attempts += 1
 
 
-# A task's tool argument list, as passed to ollama_chat (only the task's allowed, read-only tools)
-def _task_tool_list(pool_manager, model, tool_names):
-    tool_names = [tool for tool in tool_names if tool in TASK_TOOLS]
-    if not tool_names:
-        return None
-    model_show = ollama_show(pool_manager, model)
-    if 'tools' not in (model_show.get('capabilities') or []):
+# A task's allowed tool list (only the task's permitted, read-only tools), or None when the
+# model doesn't support tool calling
+def _task_tool_list(capabilities, tool_names):
+    if not capabilities.get('tools'):
         return None
     return [tool for tool in _task_web_tools() if tool['function']['name'] in tool_names]
 

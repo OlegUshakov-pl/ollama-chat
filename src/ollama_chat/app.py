@@ -13,10 +13,12 @@ import json
 import os
 import pathlib
 from functools import partial
-import platform
 import importlib.resources
+import platform
 import re
 import threading
+import time
+import urllib.parse
 import uuid
 
 import chisel
@@ -34,14 +36,25 @@ from .memory import (
 )
 from .ollama import ollama_delete, ollama_list, ollama_pull
 from .pdf import conversation_markdown, write_pdf_file
+from .providers.base import ProviderError
+from .providers.crypto import CryptoManager
+from .providers.defaults import DEFAULT_PROVIDERS, provider_base_url
+from .providers.registry import DEFAULT_PROVIDER_ID, create_provider, provider_config
 from .tasks import (
     TaskManager, load_tasks, parse_task_time, task_enabled, task_log_text, task_remove, task_upsert
 )
 
 
+# The Ollama-host name patterns for which an insecure http:// base URL is allowed
+_RE_HTTP_HOST_LOCAL = re.compile(r'^(localhost|127\.0\.0\.1|\[::1\]|::1)(:\d+)?$', re.IGNORECASE)
+
+# The number of seconds a provider's cached model list is served before it is fetched again
+PROVIDER_MODELS_TTL = 300.0
+
+
 # The ollama-chat back-end API WSGI application class
 class OllamaChat(chisel.Application):
-    __slots__ = ('config', 'xorigin', 'chats', 'downloads', 'download_error', 'pool_manager', 'tasks')
+    __slots__ = ('config', 'xorigin', 'chats', 'downloads', 'download_error', 'pool_manager', 'provider_models', 'crypto', 'tasks')
 
 
     def __init__(self, config_path, xorigin=False):
@@ -52,6 +65,8 @@ class OllamaChat(chisel.Application):
         self.downloads = {}
         self.download_error = None
         self.pool_manager = urllib3.PoolManager(num_pools=10, maxsize=10)
+        self.provider_models = {} # provider ID -> (fetched-at time, [{'id', 'name'}])
+        self.crypto = CryptoManager(config_path)
         self.tasks = TaskManager(self)
 
         # Back-end documentation
@@ -62,6 +77,7 @@ class OllamaChat(chisel.Application):
         self.add_request(delete_conversation)
         self.add_request(delete_conversation_exchange)
         self.add_request(delete_model)
+        self.add_request(delete_provider)
         self.add_request(delete_task)
         self.add_request(delete_template)
         self.add_request(download_model)
@@ -70,6 +86,8 @@ class OllamaChat(chisel.Application):
         self.add_request(get_conversations)
         self.add_request(get_models)
         self.add_request(get_profile)
+        self.add_request(get_provider_models)
+        self.add_request(get_providers)
         self.add_request(get_settings)
         self.add_request(get_system_info)
         self.add_request(get_task_log)
@@ -80,6 +98,7 @@ class OllamaChat(chisel.Application):
         self.add_request(regenerate_conversation_exchange)
         self.add_request(reply_conversation)
         self.add_request(run_task)
+        self.add_request(save_provider)
         self.add_request(send_email_request)
         self.add_request(set_conversation_title)
         self.add_request(set_email_settings)
@@ -93,6 +112,7 @@ class OllamaChat(chisel.Application):
         self.add_request(stop_model_download)
         self.add_request(stop_task)
         self.add_request(test_email_connection_request)
+        self.add_request(test_provider)
         self.add_request(update_template)
 
         # Front-end statics
@@ -229,6 +249,7 @@ def get_conversations(ctx, unused_req):
                     'model': conversation['model'],
                     'title': conversation['title'],
                     'generating': conversation['id'] in ctx.app.chats,
+                    **({'provider': conversation['provider']} if conversation.get('provider') else {}),
                     **({'taskId': conversation['taskId']} if conversation.get('taskId') else {})
                 }
                 for conversation in config['conversations']
@@ -260,6 +281,8 @@ def get_conversations(ctx, unused_req):
 def set_model(ctx, req):
     with ctx.app.config(save=True) as config:
         config['model'] = req['model']
+        if req.get('provider'):
+            config['provider'] = req['provider']
 
 
 # Set the workspace directory, creating it (and its memory directory) if it doesn't exist
@@ -552,8 +575,9 @@ def start_conversation(ctx, req):
         model = req.get('model', config.get('model'))
         if model is None:
             raise chisel.ActionError('NoModel')
+        provider_id = _validated_provider(config, req.get('provider'))
         id_ = str(uuid.uuid4())
-        conversation = {'id': id_, 'model': model, 'title': title, 'exchanges': []}
+        conversation = {'id': id_, 'model': model, 'provider': provider_id, 'title': title, 'exchanges': []}
 
         # Add the new conversation to the application config
         config['conversations'].insert(0, conversation)
@@ -596,8 +620,9 @@ def start_template(ctx, req):
         model = req.get('model', config.get('model'))
         if model is None:
             raise chisel.ActionError('NoModel')
+        provider_id = _validated_provider(config, req.get('provider'))
         id_ = str(uuid.uuid4())
-        conversation = {'id': id_, 'model': model, 'title': title, 'exchanges': []}
+        conversation = {'id': id_, 'model': model, 'provider': provider_id, 'title': title, 'exchanges': []}
 
         # Add the new conversation to the application config
         config['conversations'].insert(0, conversation)
@@ -709,6 +734,12 @@ def reply_conversation(ctx, req):
         # Busy?
         if id_ in ctx.app.chats:
             raise chisel.ActionError('ConversationBusy')
+
+        # Switch the conversation's model and provider, when the request names them
+        if req.get('model'):
+            conversation['model'] = req['model']
+        if req.get('provider'):
+            conversation['provider'] = _validated_provider(config, req['provider'])
 
         # Start the model chat
         ctx.app.chats[id_] = ChatManager(
@@ -937,6 +968,210 @@ def stop_model_download(ctx, req):
 @chisel.action(name='deleteModel', types=OLLAMA_CHAT_TYPES)
 def delete_model(ctx, req):
     ollama_delete(ctx.app.pool_manager, req['model'])
+
+
+# Seed the built-in providers into the config, adding any missing built-in providers (e.g.
+# after upgrading). Returns True when the config was modified.
+def _seed_providers(config):
+    providers = config.get('providers')
+    if providers is None:
+        config['providers'] = [dict(provider, builtIn=True, enabled=True) for provider in DEFAULT_PROVIDERS]
+        return True
+    existing_ids = set(provider.get('id') for provider in providers)
+    added = False
+    for default_provider in DEFAULT_PROVIDERS:
+        if default_provider['id'] not in existing_ids:
+            providers.append(dict(default_provider, builtIn=True, enabled=True))
+            added = True
+    return added
+
+
+# A provider's settings-page info. The API key is never included - only whether one is saved
+# (hasApiKey) and its display mask.
+def _provider_info(crypto, provider):
+    info = {
+        'id': provider['id'],
+        'name': provider['name'],
+        'type': provider['type'],
+        'enabled': provider.get('enabled', True),
+        'builtIn': provider.get('builtIn', True),
+        'hasApiKey': bool(provider.get('apiKeyEnc'))
+    }
+    base_url = provider_base_url(provider)
+    if base_url:
+        info['baseUrl'] = base_url
+    if provider.get('defaultModel'):
+        info['defaultModel'] = provider['defaultModel']
+    if info['hasApiKey']:
+        info['apiKeyMask'] = crypto.key_mask(provider['apiKeyEnc'])
+    return info
+
+
+# A new custom provider's unique ID, derived from its display name
+def _custom_provider_id(name, providers):
+    base_id = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-') or 'provider'
+    suffix = 0
+    while True:
+        provider_id = base_id if not suffix else f'{base_id}-{suffix}'
+        if not any(provider.get('id') == provider_id for provider in providers):
+            return provider_id
+        suffix += 1
+
+
+# Validate a conversation's requested provider ID, returning the resolved provider ID - the
+# request's, the config's current provider, or local Ollama. Raises ActionError for an unknown
+# or disabled provider.
+def _validated_provider(config, provider_id):
+    provider_id = provider_id or config.get('provider') or DEFAULT_PROVIDER_ID
+    provider = provider_config(config, provider_id)
+    if provider is None:
+        raise chisel.ActionError('UnknownProvider', f'No provider "{provider_id}"')
+    if not provider.get('enabled', True):
+        raise chisel.ActionError( \
+            'ProviderDisabled', \
+            f'The provider "{provider["name"]}" is disabled - enable it in settings or select another model.' \
+        )
+    return provider_id
+
+
+# Get the AI providers, seeding the built-in providers into the config on the first call
+@chisel.action(name='getProviders', types=OLLAMA_CHAT_TYPES)
+def get_providers(ctx, unused_req):
+    with ctx.app.config(save=True) as config:
+        _seed_providers(config)
+        return { \
+            'providers': [_provider_info(ctx.app.crypto, provider) for provider in config.get('providers') or []] \
+        }
+
+
+# Create or update an AI provider. The API key is write-only: an empty "apiKey" keeps the
+# saved key and "deleteApiKey" erases it. The key is stored AES-GCM encrypted and never sent
+# back to the browser.
+@chisel.action(name='saveProvider', types=OLLAMA_CHAT_TYPES)
+def save_provider(ctx, req):
+    with ctx.app.config(save=True) as config:
+        providers = config.get('providers')
+        if providers is None:
+            _seed_providers(config)
+            providers = config['providers']
+
+        # The provider to save - by ID for an update, else a new custom provider
+        provider_id = req.get('id')
+        if provider_id is None:
+            provider = { \
+                'id': _custom_provider_id(req['name'], providers), \
+                'name': req['name'], \
+                'type': 'custom', \
+                'builtIn': False, \
+                'enabled': True \
+            }
+            providers.append(provider)
+        else:
+            provider = next((entry for entry in providers if entry['id'] == provider_id), None)
+            if provider is None:
+                raise chisel.ActionError('UnknownProvider', f'No provider "{provider_id}"')
+
+        # Display name
+        if req.get('name'):
+            provider['name'] = req['name']
+
+        # Base URL - http/https only; an empty value restores the provider's default
+        warning = None
+        if 'baseUrl' in req:
+            base_url = req['baseUrl'] or ''
+            if base_url:
+                parsed_url = urllib.parse.urlparse(base_url)
+                if parsed_url.scheme not in ('http', 'https') or not parsed_url.netloc:
+                    raise chisel.ActionError( \
+                        'BadProvider', \
+                        f'Invalid base URL "{base_url}" - it must be an http or https URL' \
+                    )
+                provider['baseUrl'] = base_url
+                if parsed_url.scheme == 'http' \
+                        and provider.get('type') in ('openai', 'anthropic', 'google') \
+                        and not _RE_HTTP_HOST_LOCAL.match(parsed_url.hostname or ''):
+                    warning = \
+                        f'The base URL "{base_url}" uses an insecure http:// connection - ' \
+                        'use https:// for a cloud provider'
+            else:
+                provider.pop('baseUrl', None)
+
+        # API key - empty keeps the saved key, "deleteApiKey" erases it
+        if req.get('deleteApiKey'):
+            provider.pop('apiKeyEnc', None)
+        elif req.get('apiKey'):
+            provider['apiKeyEnc'] = ctx.app.crypto.encrypt_api_key(req['apiKey'])
+
+        # Default model and enabled flag
+        if 'defaultModel' in req:
+            if req['defaultModel']:
+                provider['defaultModel'] = req['defaultModel']
+            else:
+                provider.pop('defaultModel', None)
+        if 'enabled' in req:
+            provider['enabled'] = bool(req['enabled'])
+
+        response = {'provider': _provider_info(ctx.app.crypto, provider)}
+        # A saved provider invalidates its cached model list (base URL or key may have changed)
+        ctx.app.provider_models.pop(provider['id'], None)
+        if warning:
+            response['warning'] = warning
+        return response
+
+
+# Delete a custom AI provider - built-in providers can be disabled but not deleted
+@chisel.action(name='deleteProvider', types=OLLAMA_CHAT_TYPES)
+def delete_provider(ctx, req):
+    with ctx.app.config(save=True) as config:
+        providers = config.get('providers')
+        if providers is None:
+            _seed_providers(config)
+            providers = config['providers']
+        provider = next((entry for entry in providers if entry['id'] == req['id']), None)
+        if provider is None:
+            raise chisel.ActionError('UnknownProvider', f'No provider "{req["id"]}"')
+        if provider.get('builtIn', False):
+            raise chisel.ActionError( \
+                'BuiltInProvider', \
+                f'The provider "{provider["name"]}" is built in - disable it instead of deleting it.' \
+            )
+        config['providers'] = [entry for entry in providers if entry['id'] != req['id']]
+        ctx.app.provider_models.pop(req['id'], None)
+
+
+# Check a provider's connection and API key
+@chisel.action(name='testProvider', types=OLLAMA_CHAT_TYPES)
+def test_provider(ctx, req):
+    with ctx.app.config() as config:
+        provider = provider_config(config, req['id'])
+    if provider is None:
+        raise chisel.ActionError('UnknownProvider', f'No provider "{req["id"]}"')
+    try:
+        message = create_provider(provider['id'], ctx.app.pool_manager, provider, crypto=ctx.app.crypto).test_connection()
+    except ProviderError as exc:
+        raise chisel.ActionError('TestFailed', exc.message) from None
+    except Exception as exc:
+        raise chisel.ActionError('TestFailed', f'Connection failed: {exc}') from None
+    return {'message': message}
+
+
+# Get a provider's available models, cached for a few minutes unless "refresh" is set
+@chisel.action(name='getProviderModels', types=OLLAMA_CHAT_TYPES)
+def get_provider_models(ctx, req):
+    provider_id = req['provider']
+    with ctx.app.config() as config:
+        provider = provider_config(config, provider_id)
+    if provider is None:
+        raise chisel.ActionError('UnknownProvider', f'No provider "{provider_id}"')
+
+    fetched_at, models = ctx.app.provider_models.get(provider_id, (None, None))
+    if models is None or req.get('refresh') or time.time() - fetched_at > PROVIDER_MODELS_TTL:
+        try:
+            models = create_provider(provider_id, ctx.app.pool_manager, provider, crypto=ctx.app.crypto).list_models()
+        except Exception as exc:
+            raise chisel.ActionError('TestFailed', f'Failed to fetch the model list: {exc}') from None
+        ctx.app.provider_models[provider_id] = (time.time(), models)
+    return {'models': models}
 
 
 @chisel.action(name='getSystemInfo', types=OLLAMA_CHAT_TYPES)

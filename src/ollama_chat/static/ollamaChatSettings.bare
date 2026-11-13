@@ -1,0 +1,27 @@
+# Licensed under the MIT License
+
+include <args.bare>
+include <forms.bare>
+
+include 'ollamaChatUtil.bare'
+
+# Settings page entry point
+async function ollamaChatSettingsPage():
+    documentSetTitle('Settings')
+    markdownPrint('# Settings')
+    markdownPrint('', '## AI Providers')
+    providersResponseText = systemFetch('getProviders')
+    providersResponse = if(providersResponseText != null, jsonParse(providersResponseText))
+    if providersResponse == null:
+        ollamaChatErrorPage('Failed to get providers')
+        return
+    endif
+    providers = objectGet(providersResponse, 'providers')
+    providers = if(providers != null, providers, [])
+    for provider in providers:
+        name = objectGet(provider, 'name')
+        enabled = objectGet(provider, 'enabled')
+        hasKey = objectGet(provider, 'hasKey')
+        markdownPrint('', '**' + markdownEscape(name) + '** - enabled: ' + markdownEscape(if(enabled, 'yes', 'no')) + ', key: ' + if(hasKey, 'set', 'not set'))
+    endfor
+endfunction

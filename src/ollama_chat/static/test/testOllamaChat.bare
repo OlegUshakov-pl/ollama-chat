@@ -846,3 +846,53 @@ function testOllamaChatTaskDaysText():
     unittestDeepEqual(ollamaChatTaskDaysText([8]), 'never')
 endfunction
 unittestRunTest('testOllamaChatTaskDaysText')
+
+
+#
+# ollamaChatSettingsPage
+#
+
+async function testOllamaChatSettingsPage():
+    unittestMockAll({'systemFetch': {'getProviders': jsonStringify({'providers': [{'name':'Ollama','enabled':true,'hasKey':false}]})}})
+    ollamaChatSettingsPage()
+    unittestDeepEqual(unittestMockEnd(), [ \
+        ['documentSetTitle', ['Settings']], \
+        ['markdownPrint', ['# Settings']], \
+        ['markdownPrint', ['', '## AI Providers']], \
+        ['systemFetch', ['getProviders']], \
+        ['markdownPrint', ['', '**Ollama** - enabled: yes, key: not set']] \
+    ])
+endfunction
+unittestRunTest('testOllamaChatSettingsPage')
+
+
+async function testOllamaChatSettingsPageError():
+    unittestMockAll({'systemFetch': {}})
+    ollamaChatSettingsPage()
+    unittestDeepEqual(unittestMockEnd(), [ \
+        ['documentSetTitle', ['Settings']], \
+        ['markdownPrint', ['# Settings']], \
+        ['markdownPrint', ['', '## AI Providers']], \
+        ['systemFetch', ['getProviders']], \
+        ['documentSetTitle', ['Ollama Chat']], \
+        ['markdownPrint', ["[Back](#var=)", '', '# Ollama Chat', '', '**ERROR:** Failed to get providers']] \
+    ])
+endfunction
+unittestRunTest('testOllamaChatSettingsPageError')
+
+
+async function testOllamaChatSettingsMain():
+    unittestMockAll({'systemFetch': {'getProviders': jsonStringify({'providers': []})}})
+    args = argsParse(ollamaChatArguments)
+    systemGlobalSet('vView', 'settings')
+    args = argsParse(ollamaChatArguments)
+    ollamaChatMain()
+    systemGlobalSet('vView', null)
+    unittestDeepEqual(unittestMockEnd(), [ \
+        ['documentSetTitle', ['Settings']], \
+        ['markdownPrint', ['# Settings']], \
+        ['markdownPrint', ['', '## AI Providers']], \
+        ['systemFetch', ['getProviders']] \
+    ])
+endfunction
+unittestRunTest('testOllamaChatSettingsMain')

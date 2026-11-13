@@ -802,7 +802,7 @@ class TestChatManager(unittest.TestCase):
                 json.dumps({'message': {'content': 'there'}}).encode('utf-8') + b'\n'
             ]
             with unittest.mock.patch('threading.Thread'), \
-                 unittest.mock.patch('ollama_chat.ollama.STREAM_IDLE_TIMEOUT', 0.1), \
+                 unittest.mock.patch('ollama_chat.providers.stream.STREAM_IDLE_TIMEOUT', 0.1), \
                  unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
                 mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
                 mock_show_response.status = 200
@@ -828,7 +828,7 @@ class TestChatManager(unittest.TestCase):
                             'exchanges': [
                                 {
                                     'user': 'Hello',
-                                    'model': 'Hi \n**ERROR:** Ollama stream stalled - no data for 0 seconds'
+                                    'model': 'Hi \n**ERROR:** Stream stalled - no data for 0 seconds'
                                 }
                             ]
                         }

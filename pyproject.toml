@@ -29,6 +29,7 @@ classifiers = [
 ]
 dependencies = [
     "chisel >= 2.4.0, < 2.5.0",
+    "cryptography >= 42.0.0",
     "urllib3 >= 2.5.0",
     "waitress >= 3.0.0",
     "python-docx >= 1.1.0",
@@ -45,7 +46,7 @@ ollama-chat = "ollama_chat.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-packages = ["ollama_chat", "ollama_chat.static"]
+packages = ["ollama_chat", "ollama_chat.providers", "ollama_chat.static"]
 
 [tool.setuptools.package-data]
 ollama_chat = [

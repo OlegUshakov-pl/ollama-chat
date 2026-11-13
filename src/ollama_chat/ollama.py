@@ -1,19 +1,18 @@
 # Licensed under the MIT License
 # https://github.com/craigahobbs/ollama-chat/blob/main/LICENSE
 
-import codecs
 import datetime
-import json
 import os
-import queue
-import threading
 
 import urllib3
 
+from .providers.stream import iter_ndjson as _iter_ndjson, watch_chunks as _watch_chunks
 
-# Helper function to get an Ollama API URL
-def _get_ollama_url(path):
-    ollama_host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+
+# Helper function to get an Ollama API URL. The base URL comes from the provider's config, or
+# the OLLAMA_HOST environment variable.
+def _get_ollama_url(path, base_url=None):
+    ollama_host = base_url or os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
     return f'{ollama_host}{path}'
 
 
@@ -32,80 +31,9 @@ def _error_detail(response):
     return ''
 
 
-# Decode a streamed, newline-delimited JSON (NDJSON) response into individual JSON objects. The
-# Ollama API streams one JSON object per line, but HTTP chunk boundaries do not align with those
-# lines - a single chunk may carry multiple objects (common with cloud models) or a partial object
-# split across chunks. Buffer the decoded text and yield each complete JSON object as it arrives.
-def _iter_ndjson(response):
-    decoder = json.JSONDecoder()
-    text_decoder = codecs.getincrementaldecoder('utf-8')()
-    buffer = ''
-    for data in _watch_chunks(response.read_chunked()):
-        buffer += text_decoder.decode(data)
-        while True:
-            buffer = buffer.lstrip()
-            if not buffer:
-                break
-            try:
-                chunk, index = decoder.raw_decode(buffer)
-            except json.JSONDecodeError:
-                # Incomplete object - wait for the next chunk to complete it
-                break
-            buffer = buffer[index:]
-            yield chunk
-
-    # The stream ended mid-object - the response was truncated or malformed
-    if buffer.strip():
-        raise urllib3.exceptions.HTTPError(f'Invalid streamed response: {buffer.strip()!r}')
-
-
-# The maximum number of seconds without a streamed chunk before the stream is considered stalled -
-# a broken model template can crash Ollama's llama-server mid-stream, leaving the connection open
-# but silent (the chat would hang forever without this watchdog)
-STREAM_IDLE_TIMEOUT = 240.0
-
-_QUEUE_CLOSED_CHUNK = object()
-
-# Capture the real thread class at import time - unit tests globally patch "threading.Thread" to
-# prevent background threads, but the watchdog reader must always run
-ThreadClass = threading.Thread
-
-
-# Read the streamed HTTP chunks from a reader thread, raising if no chunk arrives within
-# "timeout" seconds (the watchdog thread itself never blocks the reader)
-def _watch_chunks(raw_chunks, timeout=None):
-    timeout = STREAM_IDLE_TIMEOUT if timeout is None else timeout
-    chunk_queue = queue.Queue()
-    raised = None
-
-    def _read_chunks():
-        nonlocal raised
-        try:
-            for raw_chunk in raw_chunks:
-                chunk_queue.put(raw_chunk)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            raised = exc
-        chunk_queue.put(_QUEUE_CLOSED_CHUNK)
-
-    reader_thread = ThreadClass(target=_read_chunks, daemon=True)
-    reader_thread.start()
-    while True:
-        try:
-            chunk = chunk_queue.get(timeout=timeout)
-        except queue.Empty:
-            raise urllib3.exceptions.HTTPError( \
-                f'Ollama stream stalled - no data for {timeout:.0f} seconds' \
-            ) from None
-        if chunk is _QUEUE_CLOSED_CHUNK:
-            if raised is not None:
-                raise raised
-            return
-        yield chunk
-
-
 # Get an Ollama model's metadata (including its capabilities)
-def ollama_show(pool_manager, model):
-    url_show = _get_ollama_url('/api/show')
+def ollama_show(pool_manager, model, base_url=None):
+    url_show = _get_ollama_url('/api/show', base_url)
     data_show = {'model': model}
     response_show = pool_manager.request('POST', url_show, json=data_show, retries=0)
     try:
@@ -121,14 +49,14 @@ def ollama_show(pool_manager, model):
 
 
 # Call the Ollama chat API and yield each streamed JSON response chunk
-def ollama_chat(pool_manager, model, messages, think=None, tools=None, model_show=None, num_ctx=None):
+def ollama_chat(pool_manager, model, messages, think=None, tools=None, model_show=None, num_ctx=None, base_url=None):
     # Is this a thinking model?
     if model_show is None:
-        model_show = ollama_show(pool_manager, model)
+        model_show = ollama_show(pool_manager, model, base_url)
     is_thinking = think if think is not None else ('capabilities' in model_show and 'thinking' in model_show['capabilities'])
 
     # Start a streaming chat request
-    url_chat = _get_ollama_url('/api/chat')
+    url_chat = _get_ollama_url('/api/chat', base_url)
     data_chat = {'model': model, 'messages': messages, 'stream': True, 'think': is_thinking}
     if tools:
         data_chat['tools'] = tools
@@ -153,8 +81,8 @@ def ollama_chat(pool_manager, model, messages, think=None, tools=None, model_sho
 
 
 # List the locally available Ollama models
-def ollama_list(pool_manager):
-    url_list = _get_ollama_url('/api/tags')
+def ollama_list(pool_manager, base_url=None):
+    url_list = _get_ollama_url('/api/tags', base_url)
     response_list = pool_manager.request('GET', url_list, retries=0)
     try:
         if response_list.status != 200:
@@ -173,8 +101,8 @@ def ollama_list(pool_manager):
 
 
 # Delete a locally available Ollama model
-def ollama_delete(pool_manager, model):
-    url_delete = _get_ollama_url('/api/delete')
+def ollama_delete(pool_manager, model, base_url=None):
+    url_delete = _get_ollama_url('/api/delete', base_url)
     data_delete = {'model': model}
     response_delete = pool_manager.request('DELETE', url_delete, json=data_delete, retries=0)
     try:
@@ -185,8 +113,8 @@ def ollama_delete(pool_manager, model):
 
 
 # Pull an Ollama model, yielding each streamed JSON progress chunk
-def ollama_pull(pool_manager, model):
-    url_pull = _get_ollama_url('/api/pull')
+def ollama_pull(pool_manager, model, base_url=None):
+    url_pull = _get_ollama_url('/api/pull', base_url)
     data_pull = {'model': model, 'stream': True}
     response_pull = pool_manager.request('POST', url_pull, json=data_pull, preload_content=False, retries=0)
     try:

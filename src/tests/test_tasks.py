@@ -296,8 +296,10 @@ class TestTaskResult(unittest.TestCase):
 # round-specific chunk lists - round N of the tool-calling loop returns round N's chunks.
 @contextmanager
 def mock_ollama(rounds, capabilities=None):
-    with unittest.mock.patch('ollama_chat.tasks.ollama_chat', side_effect=[iter(r) for r in rounds]) as mock_chat:
-        with unittest.mock.patch('ollama_chat.tasks.ollama_show', \
+    with unittest.mock.patch( \
+        'ollama_chat.providers.ollama.ollama_chat', side_effect=[iter(r) for r in rounds] \
+    ) as mock_chat:
+        with unittest.mock.patch('ollama_chat.providers.ollama.ollama_show', \
             return_value=None if capabilities is None else {'capabilities': capabilities} \
         ) as mock_show:
             yield mock_chat, mock_show

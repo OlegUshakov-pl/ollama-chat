@@ -39,6 +39,7 @@ class TestApp(unittest.TestCase):
                     'deleteConversation',
                     'deleteConversationExchange',
                     'deleteModel',
+                    'deleteProvider',
                     'deleteTask',
                     'deleteTemplate',
                     'downloadModel',
@@ -47,6 +48,8 @@ class TestApp(unittest.TestCase):
                     'getConversations',
                     'getModels',
                     'getProfile',
+                    'getProviderModels',
+                    'getProviders',
                     'getSettings',
                     'getSystemInfo',
                     'getTaskLog',
@@ -63,6 +66,7 @@ class TestApp(unittest.TestCase):
                     'regenerateConversationExchange',
                     'replyConversation',
                     'runTask',
+                    'saveProvider',
                     'sendEmail',
                     'setConversationTitle',
                     'setEmailSettings',
@@ -76,6 +80,7 @@ class TestApp(unittest.TestCase):
                     'stopModelDownload',
                     'stopTask',
                     'testEmailConnection',
+                    'testProvider',
                     'updateTemplate',
                     'vendor/marked.min.js',
                     'vendor/purify.min.js'
@@ -100,6 +105,7 @@ class TestApp(unittest.TestCase):
                     'deleteConversation',
                     'deleteConversationExchange',
                     'deleteModel',
+                    'deleteProvider',
                     'deleteTask',
                     'deleteTemplate',
                     'downloadModel',
@@ -108,6 +114,8 @@ class TestApp(unittest.TestCase):
                     'getConversations',
                     'getModels',
                     'getProfile',
+                    'getProviderModels',
+                    'getProviders',
                     'getSettings',
                     'getSystemInfo',
                     'getTaskLog',
@@ -124,6 +132,7 @@ class TestApp(unittest.TestCase):
                     'regenerateConversationExchange',
                     'replyConversation',
                     'runTask',
+                    'saveProvider',
                     'sendEmail',
                     'setConversationTitle',
                     'setEmailSettings',
@@ -137,6 +146,7 @@ class TestApp(unittest.TestCase):
                     'stopModelDownload',
                     'stopTask',
                     'testEmailConnection',
+                    'testProvider',
                     'updateTemplate',
                     'vendor/marked.min.js',
                     'vendor/purify.min.js',
@@ -1560,7 +1570,7 @@ class TestAPI(unittest.TestCase):
                 self.assertDictEqual(config, {
                 'model': 'llm',
                 'conversations': [
-                    {'id': '12345678-1234-5678-1234-567812345678', 'model': 'llm', 'title': 'Hello', 'exchanges': []}
+                    {'id': '12345678-1234-5678-1234-567812345678', 'model': 'llm', 'provider': 'ollama', 'title': 'Hello', 'exchanges': []}
                 ]
             })
 
@@ -1632,7 +1642,7 @@ class TestAPI(unittest.TestCase):
             with app.config() as config:
                 self.assertDictEqual(config, {
                     'conversations': [
-                        {'id': '12345678-1234-5678-1234-567812345678', 'model': 'llm', 'title': 'Hello', 'exchanges': []}
+                        {'id': '12345678-1234-5678-1234-567812345678', 'model': 'llm', 'provider': 'ollama', 'title': 'Hello', 'exchanges': []}
                     ]
                 })
 
@@ -1665,6 +1675,7 @@ class TestAPI(unittest.TestCase):
                         {
                             'id': '12345678-1234-5678-1234-567812345678',
                             'model': 'llm',
+                            'provider': 'ollama',
                             'title': 'This is a very long title and needs to be cut o...',
                             'exchanges': []
                         }
@@ -1831,7 +1842,7 @@ class TestAPI(unittest.TestCase):
                 self.assertDictEqual(config, {
                     'model': 'llm',
                     'conversations': [
-                        {'id': '12345678-1234-5678-1234-567812345678', 'model': 'llm', 'title': 'Template 1', 'exchanges': []}
+                        {'id': '12345678-1234-5678-1234-567812345678', 'model': 'llm', 'provider': 'ollama', 'title': 'Template 1', 'exchanges': []}
                     ],
                     'templates': [
                         {'id': 'tmpl1', 'name': 'test', 'title': 'Template 1', 'prompts': ['Prompt 1']}
@@ -1875,7 +1886,7 @@ class TestAPI(unittest.TestCase):
                 self.assertDictEqual(config, {
                     'model': 'llm',
                     'conversations': [
-                        {'id': '12345678-1234-5678-1234-567812345678', 'model': 'llm', 'title': 'Template 1', 'exchanges': []}
+                        {'id': '12345678-1234-5678-1234-567812345678', 'model': 'llm', 'provider': 'ollama', 'title': 'Template 1', 'exchanges': []}
                     ],
                     'templates': [
                         {'id': 'tmpl1', 'name': 'test', 'title': 'Template 1', 'prompts': ['Prompt 1']}
@@ -1917,7 +1928,7 @@ class TestAPI(unittest.TestCase):
             with app.config() as config:
                 self.assertDictEqual(config, {
                     'conversations': [
-                        {'id': '12345678-1234-5678-1234-567812345678', 'model': 'llm', 'title': 'Template 1', 'exchanges': []}
+                        {'id': '12345678-1234-5678-1234-567812345678', 'model': 'llm', 'provider': 'ollama', 'title': 'Template 1', 'exchanges': []}
                     ],
                     'templates': [
                         {'id': 'tmpl1', 'name': 'test', 'title': 'Template 1', 'prompts': ['Prompt 1']}

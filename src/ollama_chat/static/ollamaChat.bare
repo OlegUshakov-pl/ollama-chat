@@ -6,6 +6,7 @@ include <forms.bare>
 
 include 'ollamaChatConversation.bare'
 include 'ollamaChatModels.bare'
+include 'ollamaChatSettings.bare'
 include 'ollamaChatTemplate.bare'
 include 'ollamaChatUtil.bare'
 
@@ -20,6 +21,8 @@ async function ollamaChatMain():
         ollamaChatModelsDownloadPage(args)
     elif view == 'models':
         ollamaChatModelsPage(args)
+    elif view == 'settings':
+        ollamaChatSettingsPage(args)
     elif view == 'template':
         ollamaChatTemplatePage(args)
     elif view == 'variables':

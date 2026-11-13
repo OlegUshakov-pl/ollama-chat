@@ -14,6 +14,10 @@ struct ConversationInfo
     # The model ID
     string model
 
+    # The conversation's AI provider ID. Old conversations have no provider - they use local
+    # Ollama.
+    optional string provider
+
     # The conversation title
     string title
 
@@ -299,6 +303,105 @@ struct ModelInfo
     datetime modified
 
 
+# An AI provider's configuration, stored in the config file
+struct ProviderConfig
+
+    # The provider identifier (e.g. "openai"), referenced by conversations and tasks
+    string id
+
+    # The provider's display name
+    string name
+
+    # The provider's API type - "ollama", "openai", "anthropic", "google" or "custom"
+    string type
+
+    # The API base URL. When unset, a built-in provider uses its documented default and local
+    # Ollama uses the OLLAMA_HOST environment variable.
+    optional string baseUrl
+
+    # The AES-GCM encrypted API key, hex "iv:cipher16:cipher" format. Never sent to the
+    # browser - only its mask is.
+    optional string apiKeyEnc
+
+    # The default model ID
+    optional string defaultModel
+
+    # If true, the provider is available for chats (the default is true)
+    optional bool enabled
+
+    # If true, the provider is built in - it can be disabled but not deleted
+    optional bool builtIn
+
+
+# An AI provider's info for the settings page. The API key is never included - only whether
+# one is saved (hasApiKey) and its mask.
+struct ProviderInfo
+
+    # The provider identifier
+    string id
+
+    # The provider's display name
+    string name
+
+    # The provider's API type - "ollama", "openai", "anthropic", "google" or "custom"
+    string type
+
+    # The provider's effective base URL
+    optional string baseUrl
+
+    # The default model ID
+    optional string defaultModel
+
+    # If true, the provider is available for chats
+    bool enabled
+
+    # If true, the provider is built in - it can be disabled but not deleted
+    bool builtIn
+
+    # True when an API key is saved
+    bool hasApiKey
+
+    # The saved API key's display mask, when one is saved
+    optional string apiKeyMask
+
+
+# A provider create/update input. With an "id" member the named provider is updated,
+# otherwise a new custom provider is created. The API key is write-only: an empty value keeps
+# the saved key and "deleteApiKey" erases it.
+struct ProviderInput
+
+    # The provider identifier, for an update
+    optional string id
+
+    # The provider's display name
+    string name
+
+    # The API base URL. An empty value restores the provider's default.
+    optional string baseUrl
+
+    # The API key. An empty value keeps the saved key.
+    optional string apiKey
+
+    # If true, delete the saved API key
+    optional bool deleteApiKey
+
+    # The default model ID
+    optional string defaultModel
+
+    # If true, the provider is enabled for chats
+    optional bool enabled
+
+
+# A provider's available model
+struct ProviderModelInfo
+
+    # The model ID
+    string id
+
+    # The model name
+    string name
+
+
 # Model download information
 struct ModelDownloadInfo
 
@@ -324,8 +427,14 @@ struct OllamaChatConfig
     # The current model ID
     optional string model
 
+    # The current AI provider ID, for new conversations (the default is "ollama")
+    optional string provider
+
     # The saved conversations
     Conversation[] conversations
+
+    # The AI providers
+    optional ProviderConfig[] providers
 
     # The conversation templates
     optional ConversationTemplate[] templates
@@ -616,6 +725,9 @@ action setModel
         # The model ID
         string model
 
+        # The model's AI provider ID (the default is "ollama")
+        optional string provider
+
 
 # Move a conversation
 action moveConversation
@@ -720,6 +832,9 @@ action startConversation
         # The model ID
         optional string model
 
+        # The AI provider ID (the default is the config's provider, or "ollama")
+        optional string provider
+
         # The user prompt
         string user
 
@@ -744,6 +859,8 @@ action startConversation
 
     errors
         NoModel
+        ProviderDisabled
+        UnknownProvider
 
 
 # Start a conversation
@@ -814,6 +931,12 @@ action replyConversation
         # The user reply prompt
         string user
 
+        # The model ID, to switch the conversation's model
+        optional string model
+
+        # The AI provider ID, to switch the conversation's provider
+        optional string provider
+
         # If true, enable thinking mode
         optional bool think
 
@@ -831,7 +954,9 @@ action replyConversation
 
     errors
         ConversationBusy
+        ProviderDisabled
         UnknownConversationID
+        UnknownProvider
 
 
 # Confirm or discard a model-drafted email
@@ -997,3 +1122,86 @@ action deleteModel
     input
         # The model ID
         string model
+
+
+# Get the AI providers. The built-in providers are seeded into the config on the first call.
+action getProviders
+    urls
+        GET
+
+    output
+        # The providers
+        ProviderInfo[] providers
+
+
+# Create or update an AI provider. The API key is write-only: an empty value keeps the saved
+# key, "deleteApiKey" erases it.
+action saveProvider
+    urls
+        POST
+
+    input (ProviderInput)
+
+    output
+        # The saved provider's info
+        ProviderInfo provider
+
+        # A non-fatal warning, e.g. an insecure http:// base URL for a cloud provider
+        optional string warning
+
+    errors
+        BadProvider
+        UnknownProvider
+
+
+# Delete a custom AI provider. Built-in providers can be disabled but not deleted.
+action deleteProvider
+    urls
+        POST
+
+    input
+        # The provider identifier
+        string id
+
+    errors
+        BuiltInProvider
+        UnknownProvider
+
+
+# Check a provider's connection and API key
+action testProvider
+    urls
+        POST
+
+    input
+        # The provider identifier
+        string id
+
+    output
+        # A short summary of the checked connection
+        string message
+
+    errors
+        TestFailed
+        UnknownProvider
+
+
+# Get a provider's available models, cached for a few minutes unless "refresh" is set
+action getProviderModels
+    urls
+        GET
+
+    query
+        # The provider identifier
+        string provider
+
+        # If true, bypass the model list cache
+        optional bool refresh
+
+    output
+        # The provider's available models
+        ProviderModelInfo[] models
+
+    errors
+        TestFailed
+        UnknownProvider
