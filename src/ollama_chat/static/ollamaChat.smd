@@ -91,6 +91,9 @@ struct TaskInput
     # The model ID
     string model
 
+    # The AI provider ID (defaults to local Ollama)
+    optional string provider
+
     # The task prompt
     string prompt
 
