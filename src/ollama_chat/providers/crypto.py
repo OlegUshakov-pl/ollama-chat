@@ -11,6 +11,7 @@ the ciphertext with its first 16 bytes split off, as in the CRM implementation t
 import os
 import secrets
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
@@ -77,7 +78,7 @@ class CryptoManager:
             nonce = bytes.fromhex(parts[0])
             encrypted = bytes.fromhex(parts[1]) + bytes.fromhex(parts[2])
             return AESGCM(key).decrypt(nonce, encrypted, None).decode('utf-8')
-        except ValueError:
+        except (ValueError, InvalidTag, UnicodeDecodeError):
             raise ValueError('the encrypted API key could not be decrypted') from None
 
 
@@ -86,7 +87,7 @@ class CryptoManager:
     def key_mask(self, ciphertext):
         try:
             plaintext = self.decrypt_api_key(ciphertext)
-        except ValueError:
+        except (ValueError, InvalidTag):
             return _KEY_MASK_SHORT
         return mask_api_key(plaintext)
 

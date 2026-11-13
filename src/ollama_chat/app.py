@@ -305,10 +305,15 @@ def set_workspace(ctx, req):
 def get_settings(ctx, unused_req):
     with ctx.app.config() as config:
         workspace = str(workspace_dir(config))
-        return {
+        response = {
             'workspace': workspace,
             'email': get_email_settings(workspace)
         }
+        if 'model' in config:
+            response['model'] = config['model']
+        if 'provider' in config:
+            response['provider'] = config['provider']
+        return response
 
 
 # Save the email settings to the workspace's .env file. The app password is write-only - an
@@ -921,6 +926,8 @@ def get_models(ctx, unused_req):
         }
         if 'model' in config:
             response['model'] = config['model']
+        if 'provider' in config:
+            response['provider'] = config['provider']
         if ctx.app.download_error:
             response['downloadError'] = ctx.app.download_error
             ctx.app.download_error = None

@@ -576,6 +576,8 @@ async function loadSettings() {
         state.settings.data = data;
         state.settings.loading = false;
         state.workspace = data.workspace;
+        if (data.model) state.selectedModel = data.model;
+        if (data.provider) state.selectedProvider = data.provider;
     } catch (err) {
         state.settings.loading = false;
         state.settings.error = err.message;
@@ -702,6 +704,13 @@ async function saveProviderCard(id) {
         state.providers.list = (pdata && pdata.providers) || [];
         state.providers.notice = 'Saved';
         if (state.providerForms[id]) state.providerForms[id].apiKey = '';
+        // Make the saved provider + chosen model the active selection for new chats
+        const chosenModel = (modelSelect && modelSelect.value) ? modelSelect.value : (body.defaultModel || '');
+        if (chosenModel) {
+            state.selectedProvider = id;
+            state.selectedModel = chosenModel;
+            try { await apiPost('setModel', { model: chosenModel, provider: id }); } catch (e) { /* best effort */ }
+        }
     } catch (err) {
         state.providers.error = err.message;
     }
@@ -1730,11 +1739,12 @@ function buildAiTabHtml() {
         html += `<div style="margin-bottom:0.75rem;">` +
             `<label style="display:block;font-weight:500;margin-bottom:0.25rem;">API Key <span style="display:inline-block;width:8px;height:8px;background:${statusColor};margin-left:4px;"></span></label>` +
             `<div style="display:flex;gap:0.5rem;">` +
-            `<input id="prov-key-${escapeHtml(selected.id)}" type="${form.showKey ? 'text' : 'password'}" value="${escapeHtml(form.apiKey)}" placeholder="sk-..." style="flex:1;padding:0.5rem;" oninput="state.providerForms['${selected.id}'].apiKey=this.value">` +
+            `<input id="prov-key-${escapeHtml(selected.id)}" type="${form.showKey ? 'text' : 'password'}" value="${escapeHtml(form.apiKey)}" placeholder="${selected.hasApiKey ? 'Key saved - enter a new one to replace' : 'sk-...'}" style="flex:1;padding:0.5rem;" oninput="state.providerForms['${selected.id}'].apiKey=this.value">` +
             `<button type="button" class="btn" data-action="toggleKey" data-id="${escapeHtml(selected.id)}">${form.showKey ? 'Hide' : 'Show'}</button>` +
             `<button type="button" class="btn" data-action="checkKey" data-id="${escapeHtml(selected.id)}"${testing ? ' disabled' : ''}>${testing ? 'Checking…' : 'Check Key'}</button>` +
             `</div>` +
             (keyUrl ? `<p style="font-size:0.75rem;margin-top:0.25rem;">Get key: <a href="${escapeHtml(keyUrl)}" target="_blank">${escapeHtml(keyUrl)}</a></p>` : '') +
+            (selected.hasApiKey && selected.apiKeyMask ? `<p style="font-size:0.75rem;margin-top:0.25rem;">Saved key: ${escapeHtml(selected.apiKeyMask)}</p>` : '') +
             `</div>`;
     } else {
         html += `<div style="margin-bottom:0.75rem;">` +
@@ -2128,7 +2138,7 @@ function buildComposerHtml() {
     const draft = getDraft();
     const generating = isGenerating();
     const model = composerModel();
-    const readOnly = state.route.name === 'chat';
+    const readOnly = true;
     const canSend = (draft.trim() !== '' || uploadFiles.length > 0) && !state.sending && !generating;
     const sendLabel = generating ? STRINGS.stopLabel : STRINGS.sendLabel;
     const sendIcon = generating ? ICONS.stop : ICONS.up;
@@ -2147,7 +2157,6 @@ function buildComposerHtml() {
             ? `<span class="model-pill" title="${escapeHtml(model || '')}"><span class="model-name">${escapeHtml(model || STRINGS.noModels)}</span></span>`
             : `<button type="button" class="model-pill" id="model-pill" aria-haspopup="menu" aria-expanded="${state.modelMenuOpen}" ` +
                 `title="${escapeHtml(STRINGS.selectModel)}"><span class="model-name">${escapeHtml(model || STRINGS.noModels)}</span>${ICONS.chevron}</button>`) +
-        buildModelMenuHtml() +
         `</div>` +
         `<button type="button" class="icon-btn${state.webSearchEnabled ? ' websearch-active' : ''}" id="websearch-btn" data-action="toggleWebSearch" ` +
         `title="${escapeHtml(webSearchTitle)}" aria-label="${escapeHtml(webSearchTitle)}">${webSearchIcon}</button>` +
@@ -2389,8 +2398,14 @@ async function pollTick() {
 async function loadModels() {
     const data = await apiGet('getModels');
     state.models = { current: data.model || null, list: data.models || [] };
+    if (data.provider) {
+        state.selectedProvider = data.provider;
+    }
     if (!state.selectedModel) {
         state.selectedModel = state.models.current || (state.models.list.length ? state.models.list[0].id : null);
+    }
+    if (data.model && !state.selectedModel) {
+        state.selectedModel = data.model;
     }
 }
 
@@ -2417,7 +2432,7 @@ async function submitComposer() {
                 throw new Error(STRINGS.errorNoModel);
             }
             const files = await readFilesAsData(uploadFiles);
-            const data = await apiPost('startConversation', { model, user: text, think: state.thinkingEnabled, search: state.webSearchEnabled, email: state.emailEnabled, toolRounds: state.toolRounds, files });
+            const data = await apiPost('startConversation', { model, user: text, think: state.thinkingEnabled, search: state.webSearchEnabled, email: state.emailEnabled, toolRounds: state.toolRounds, files, provider: state.selectedProvider || undefined });
             setDraft('');
             uploadFiles = [];
             state.sending = false;
@@ -2927,6 +2942,11 @@ async function init() {
         await loadModels();
     } catch (err) {
         state.error = `${STRINGS.errorLoadModels} ${err.message}`;
+    }
+    try {
+        await loadSettings();
+    } catch (err) {
+        // Settings/providers are optional for the chat view; keep going
     }
     await refreshConversations();
     scheduleSidebarPoll();

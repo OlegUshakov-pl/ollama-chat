@@ -147,6 +147,12 @@ struct SettingsInfo
     EmailSettings email
     optional string lastError
 
+    # The current model ID
+    optional string model
+
+    # The current provider ID
+    optional string provider
+
 
 # The user profile - the USER.md content and its character limit
 struct ProfileInfo
@@ -1070,6 +1076,9 @@ action getModels
     output
         # The current model ID
         optional string model
+
+        # The current provider ID
+        optional string provider
 
         # The available models
         ModelInfo[] models
