@@ -57,9 +57,9 @@ async function ollamaChatIndexPage(args, conversationsResponse):
     if !currentModel:
         markdownPrint( \
             '', \
-            'Welcome to Ollama Chat! Please select a model to begin.', \
+            'Welcome to Ollama Chat! Please select a model in settings to begin.', \
             '', \
-            argsLink(ollamaChatArguments, 'Select Model', {'view': 'models'}) \
+            argsLink(ollamaChatArguments, 'Settings', {'view': 'settings'}) \
         )
         return
     endif
@@ -68,7 +68,6 @@ async function ollamaChatIndexPage(args, conversationsResponse):
     spacer = '\u00a0\u00a0'
     markdownPrint('**Current Model:** ' + currentModel)
     elementModelRender({'html': 'p', 'elem': [ \
-        formsLinkElements('Select Model', argsURL(ollamaChatArguments, {'view': 'models'})), \
         {'text': spacer + '|' + spacer}, \
         formsLinkElements('Start Conversation', argsURL(ollamaChatArguments, {'view': 'chat'})), \
         {'text': spacer + '|' + spacer}, \

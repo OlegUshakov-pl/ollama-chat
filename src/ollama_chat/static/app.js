@@ -1747,7 +1747,7 @@ function buildAiTabHtml() {
     if (!isOllama) {
         html += `<details style="margin-bottom:0.75rem;"><summary>Advanced</summary>` +
             `<label style="display:block;font-weight:500;margin:0.5rem 0 0.25rem;">Base URL</label>` +
-            `<input id="prov-url-${escapeHtml(selected.id)}" type="text" value="${escapeHtml(selected.baseUrl || '')}" style="width:100%;padding:0.5rem;">` +
+            `<input id="prov-url-${escapeHtml(selected.id)}" type="text" value="${escapeHtml(selected.baseUrl || 'https://openrouter.ai/api/v1')}" style="width:100%;padding:0.5rem;">` +
             `</details>`;
     }
     // Model select
