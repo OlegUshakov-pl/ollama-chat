@@ -276,6 +276,9 @@ const state = {
     mdViewer: null,
     workspace: null,
     settings: { loading: false, error: null, data: null, saving: false, test: null, notice: null, savingEmail: false },
+    settingsTab: 'general',
+    selectedProvider: null,
+    providerForms: {},
     providers: { loading: false, error: null, list: [], models: {}, saving: {}, testing: {}, notice: null },
     profile: { loading: false, error: null, data: null, saving: false, notice: null, values: {}, mode: 'form' },
     tasksPage: { loading: false, error: null, items: null, timer: null },
@@ -581,6 +584,9 @@ async function loadSettings() {
         const pdata = await apiGet('getProviders');
         state.providers.list = (pdata && pdata.providers) || [];
         state.providers.loading = false;
+        if (!state.selectedProvider && state.providers.list.length) {
+            state.selectedProvider = state.providers.list[0].id;
+        }
         // Fetch cached model lists for each provider (best effort)
         for (const p of state.providers.list) {
             try {
@@ -663,10 +669,11 @@ async function submitEmailSettings() {
 }
 
 async function toggleProviderEnabled(id, enabled) {
+    const prov = (state.providers.list || []).find((p) => p.id === id);
     state.providers.saving[id] = true;
     render();
     try {
-        await apiPost('saveProvider', { id, enabled });
+        await apiPost('saveProvider', { id, name: prov ? prov.name : id, enabled });
         const pdata = await apiGet('getProviders');
         state.providers.list = (pdata && pdata.providers) || [];
     } catch (err) {
@@ -680,9 +687,11 @@ async function saveProviderCard(id) {
     const urlInput = document.getElementById('prov-url-' + id);
     const keyInput = document.getElementById('prov-key-' + id);
     const modelSelect = document.getElementById('prov-model-' + id);
-    const body = { id };
+    const form = state.providerForms[id] || {};
+    const prov = (state.providers.list || []).find((p) => p.id === id);
+    const body = { id, name: prov ? prov.name : id };
     if (urlInput) body.baseUrl = urlInput.value.trim();
-    const key = keyInput ? keyInput.value : '';
+    const key = (keyInput ? keyInput.value : '') || form.apiKey || '';
     if (key) body.apiKey = key;
     if (modelSelect) body.defaultModel = modelSelect.value;
     state.providers.saving[id] = true;
@@ -692,11 +701,43 @@ async function saveProviderCard(id) {
         const pdata = await apiGet('getProviders');
         state.providers.list = (pdata && pdata.providers) || [];
         state.providers.notice = 'Saved';
+        if (state.providerForms[id]) state.providerForms[id].apiKey = '';
     } catch (err) {
         state.providers.error = err.message;
     }
     state.providers.saving[id] = false;
     render();
+}
+
+async function checkKeyCard(id) {
+    // save first then test
+    await saveProviderCard(id);
+    state.providers.testing[id] = true;
+    render();
+    try {
+        const data = await apiPost('testProvider', { id });
+        if (state.providerForms[id]) state.providerForms[id].keyStatus = 'ok';
+        state.providers.notice = (data && data.message) || 'OK';
+    } catch (err) {
+        if (state.providerForms[id]) state.providerForms[id].keyStatus = 'error';
+        state.providers.error = err.message;
+    }
+    state.providers.testing[id] = false;
+    render();
+}
+
+async function addModelManual(id) {
+    const modelId = prompt('Model ID:');
+    if (!modelId) return;
+    const modelSelect = document.getElementById('prov-model-' + id);
+    // just add option
+    if (modelSelect) {
+        const opt = document.createElement('option');
+        opt.value = modelId;
+        opt.textContent = modelId;
+        modelSelect.appendChild(opt);
+        modelSelect.value = modelId;
+    }
 }
 
 async function testProviderCard(id) {
@@ -1577,105 +1618,160 @@ function buildSettingsHtml() {
             `<div class="error-banner" role="alert">${escapeHtml(`${STRINGS.errorBannerPrefix}${form.error}`)}</div>` +
             `<p class="page-status"><button type="button" class="btn" data-action="reloadSettings">${escapeHtml(STRINGS.retry)}</button></p>`);
     }
-    const data = form.data;
-    const workspaceHtml =
-        `<section class="panel">` +
-        `<h2>${escapeHtml(STRINGS.settingsWorkspace)}</h2>` +
-        `<div class="form-row form-row-wide">` +
-        `<label class="form-field" for="workspace-input"><span>${escapeHtml(STRINGS.workspaceLabel)}</span>` +
-        `<input id="workspace-input" type="text" value="${escapeHtml(data.workspace)}" spellcheck="false"></label>` +
-        `<button type="button" class="btn btn-primary" data-action="saveWorkspace"${form.saving ? ' disabled' : ''}>` +
-        `${escapeHtml(STRINGS.workspaceSave)}</button>` +
-        `</div>` +
-        `<p class="form-hint">${escapeHtml(STRINGS.workspaceHint)}</p>` +
-        `</section>`;
-    const email = data.email || {};
-    const passwordField = email.hasPassword
-        ? `<input id="email-password" type="password" placeholder="${escapeHtml(STRINGS.emailPasswordSavedPlaceholder)}" autocomplete="new-password">`
-        : `<input id="email-password" type="password" autocomplete="new-password">`;
-    const gmailHtml =
-        `<section class="panel">` +
-        `<h2>${escapeHtml(STRINGS.settingsGmail)}</h2>` +
-        `<div class="form-grid">` +
-        `<label class="form-field" for="email-imap-host"><span>${escapeHtml(STRINGS.imapHostLabel)}</span>` +
-        `<input id="email-imap-host" type="text" value="${escapeHtml(email.imapHost || '')}" spellcheck="false" placeholder="imap.gmail.com"></label>` +
-        `<label class="form-field" for="email-imap-port"><span>${escapeHtml(STRINGS.imapPortLabel)}</span>` +
-        `<input id="email-imap-port" type="number" min="1" max="65535" value="${email.imapPort || 993}"></label>` +
-        `<label class="form-field" for="email-smtp-host"><span>${escapeHtml(STRINGS.smtpHostLabel)}</span>` +
-        `<input id="email-smtp-host" type="text" value="${escapeHtml(email.smtpHost || '')}" spellcheck="false" placeholder="smtp.gmail.com"></label>` +
-        `<label class="form-field" for="email-smtp-port"><span>${escapeHtml(STRINGS.smtpPortLabel)}</span>` +
-        `<input id="email-smtp-port" type="number" min="1" max="65535" value="${email.smtpPort || 465}"></label>` +
-        `<label class="form-field" for="email-user"><span>${escapeHtml(STRINGS.emailUserLabel)}</span>` +
-        `<input id="email-user" type="text" value="${escapeHtml(email.user || '')}" spellcheck="false"></label>` +
-        `<label class="form-field" for="email-password"><span>${escapeHtml(STRINGS.emailPasswordLabel)}</span>` +
-        passwordField + `</label>` +
-        `</div>` +
-        `<p class="form-hint">${escapeHtml(STRINGS.emailPasswordHint)} ${escapeHtml(STRINGS.emailPasswordSave)} ${escapeHtml(STRINGS.connectionHint)}</p>` +
-        `<div class="panel-actions">` +
-        `<button type="button" class="btn btn-primary" data-action="saveEmail"${form.savingEmail ? ' disabled' : ''}>` +
-        `${escapeHtml(STRINGS.settingsSaveEmail)}</button>` +
-        `<button type="button" class="btn" data-action="testConnection"${form.test && form.test.running ? ' disabled' : ''}>` +
-        `${escapeHtml(form.test && form.test.running ? STRINGS.testing : STRINGS.testConnection)}</button>` +
-        `</div>` +
-        (form.test && !form.test.running
-            ? `<div class="${form.test.ok ? 'status-ok' : 'status-err'}" role="status">${form.test.ok ? '✔' : '✖'} ${escapeHtml(form.test.message)}</div>`
-            : '') +
-        `</section>`;
-    let banners = '';
-    if (form.error) {
-        banners += `<div class="error-banner" role="alert">${escapeHtml(`${STRINGS.errorBannerPrefix}${form.error}`)}</div>`;
+    const tabs = `<div class="settings-tabs" style="display:flex;gap:0.5rem;margin-bottom:1rem;border-bottom:1px solid var(--border,#ccc);">` +
+        `<button type="button" class="btn${state.settingsTab === 'general' ? ' btn-primary' : ''}" data-action="settingsTab" data-id="general">General</button>` +
+        `<button type="button" class="btn${state.settingsTab === 'ai' ? ' btn-primary' : ''}" data-action="settingsTab" data-id="ai">AI</button>` +
+        `<button type="button" class="btn${state.settingsTab === 'users' ? ' btn-primary' : ''}" data-action="settingsTab" data-id="users">Users</button>` +
+        `</div>`;
+    let inner = tabs;
+    if (state.settingsTab === 'general') {
+        const data = form.data;
+        const workspaceHtml =
+            `<section class="panel">` +
+            `<h2>${escapeHtml(STRINGS.settingsWorkspace)}</h2>` +
+            `<div class="form-row form-row-wide">` +
+            `<label class="form-field" for="workspace-input"><span>${escapeHtml(STRINGS.workspaceLabel)}</span>` +
+            `<input id="workspace-input" type="text" value="${escapeHtml(data.workspace)}" spellcheck="false"></label>` +
+            `<button type="button" class="btn btn-primary" data-action="saveWorkspace"${form.saving ? ' disabled' : ''}>` +
+            `${escapeHtml(STRINGS.workspaceSave)}</button>` +
+            `</div>` +
+            `<p class="form-hint">${escapeHtml(STRINGS.workspaceHint)}</p>` +
+            `</section>`;
+        const email = data.email || {};
+        const passwordField = email.hasPassword
+            ? `<input id="email-password" type="password" placeholder="${escapeHtml(STRINGS.emailPasswordSavedPlaceholder)}" autocomplete="new-password">`
+            : `<input id="email-password" type="password" autocomplete="new-password">`;
+        const gmailHtml =
+            `<section class="panel">` +
+            `<h2>${escapeHtml(STRINGS.settingsGmail)}</h2>` +
+            `<div class="form-grid">` +
+            `<label class="form-field" for="email-imap-host"><span>${escapeHtml(STRINGS.imapHostLabel)}</span>` +
+            `<input id="email-imap-host" type="text" value="${escapeHtml(email.imapHost || '')}" spellcheck="false" placeholder="imap.gmail.com"></label>` +
+            `<label class="form-field" for="email-imap-port"><span>${escapeHtml(STRINGS.imapPortLabel)}</span>` +
+            `<input id="email-imap-port" type="number" min="1" max="65535" value="${email.imapPort || 993}"></label>` +
+            `<label class="form-field" for="email-smtp-host"><span>${escapeHtml(STRINGS.smtpHostLabel)}</span>` +
+            `<input id="email-smtp-host" type="text" value="${escapeHtml(email.smtpHost || '')}" spellcheck="false" placeholder="smtp.gmail.com"></label>` +
+            `<label class="form-field" for="email-smtp-port"><span>${escapeHtml(STRINGS.smtpPortLabel)}</span>` +
+            `<input id="email-smtp-port" type="number" min="1" max="65535" value="${email.smtpPort || 465}"></label>` +
+            `<label class="form-field" for="email-user"><span>${escapeHtml(STRINGS.emailUserLabel)}</span>` +
+            `<input id="email-user" type="text" value="${escapeHtml(email.user || '')}" spellcheck="false"></label>` +
+            `<label class="form-field" for="email-password"><span>${escapeHtml(STRINGS.emailPasswordLabel)}</span>` +
+            passwordField + `</label>` +
+            `</div>` +
+            `<p class="form-hint">${escapeHtml(STRINGS.emailPasswordHint)} ${escapeHtml(STRINGS.emailPasswordSave)} ${escapeHtml(STRINGS.connectionHint)}</p>` +
+            `<div class="panel-actions">` +
+            `<button type="button" class="btn btn-primary" data-action="saveEmail"${form.savingEmail ? ' disabled' : ''}>` +
+            `${escapeHtml(STRINGS.settingsSaveEmail)}</button>` +
+            `<button type="button" class="btn" data-action="testConnection"${form.test && form.test.running ? ' disabled' : ''}>` +
+            `${escapeHtml(form.test && form.test.running ? STRINGS.testing : STRINGS.testConnection)}</button>` +
+            `</div>` +
+            (form.test && !form.test.running
+                ? `<div class="${form.test.ok ? 'status-ok' : 'status-err'}" role="status">${form.test.ok ? '✔' : '✖'} ${escapeHtml(form.test.message)}</div>`
+                : '') +
+            `</section>`;
+        let banners = '';
+        if (form.error) banners += `<div class="error-banner" role="alert">${escapeHtml(`${STRINGS.errorBannerPrefix}${form.error}`)}</div>`;
+        if (form.notice) banners += `<div class="notice-banner" role="status">${escapeHtml(form.notice)}</div>`;
+        inner += banners + workspaceHtml + gmailHtml;
+    } else if (state.settingsTab === 'ai') {
+        inner += buildAiTabHtml();
+    } else {
+        inner += `<section class="panel"><p>Users management placeholder.</p></section>`;
     }
-    if (form.notice) {
-        banners += `<div class="notice-banner" role="status">${escapeHtml(form.notice)}</div>`;
-    }
-    const providersHtml = buildProvidersHtml();
-    return buildPageHtml(STRINGS.settingsHeading, banners + workspaceHtml + gmailHtml + providersHtml);
+    return buildPageHtml(STRINGS.settingsHeading, inner);
 }
 
-function buildProvidersHtml() {
+function buildAiTabHtml() {
     const ps = state.providers;
-    let inner = `<section class="panel"><h2>AI Providers</h2>`;
     if (ps.loading) {
-        inner += `<p class="page-status">${escapeHtml(STRINGS.loading)}</p></section>`;
-        return inner;
+        return `<p class="page-status">${escapeHtml(STRINGS.loading)}</p>`;
     }
     if (ps.error) {
-        inner += `<div class="error-banner" role="alert">${escapeHtml(ps.error)}</div></section>`;
-        return inner;
+        return `<div class="error-banner" role="alert">${escapeHtml(ps.error)}</div>`;
     }
     const list = ps.list || [];
+    if (!state.selectedProvider && list.length) {
+        state.selectedProvider = list[0].id;
+    }
+    const selected = list.find((p) => p.id === state.selectedProvider) || list[0];
+    if (!selected) {
+        return `<p class="page-status">No providers</p>`;
+    }
+    // provider forms
+    if (!state.providerForms[selected.id]) {
+        state.providerForms[selected.id] = { apiKey: '', showKey: false, keyStatus: (selected.hasApiKey ? 'ok' : 'unchecked') };
+    }
+    const form = state.providerForms[selected.id];
+    const isOllama = selected.type === 'ollama';
+    const models = ps.models[selected.id] || [];
+    const testing = !!ps.testing[selected.id];
+    const saving = !!ps.saving[selected.id];
+    const meta = { anthropic: 'https://console.anthropic.com/settings/keys', openai: 'https://platform.openai.com/api-keys', google: 'https://aistudio.google.com/app/apikey', mistral: 'https://console.mistral.ai/api-keys', groq: 'https://console.groq.com/keys', deepseek: 'https://platform.deepseek.com/api_keys', openrouter: 'https://openrouter.ai/keys', opencode: 'https://opencode.ai/settings/keys' };
+    const keyUrl = meta[selected.type] || '';
+    const typeBadge = selected.type === 'ollama' ? 'local' : (selected.type === 'openrouter' ? 'aggregator' : 'cloud');
+    // grid
+    let html = `<div class="provider-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.75rem;margin-bottom:1rem;">`;
     for (const p of list) {
-        const pid = p.id;
-        const enabled = !!p.enabled;
-        const hasKey = !!p.hasApiKey;
-        const baseUrl = p.baseUrl || p.defaultBaseUrl || '';
-        const defaultModel = p.defaultModel || '';
-        const models = ps.models[pid] || [];
-        const testing = !!ps.testing[pid];
-        const saving = !!ps.saving[pid];
-        const modelOptions = models.map((m) => `<option value="${escapeHtml(m)}"${m === defaultModel ? ' selected' : ''}>${escapeHtml(m)}</option>`).join('');
-        inner +=
-            `<div class="provider-card" data-provider="${escapeHtml(pid)}" style="margin-bottom:1rem;padding:0.75rem;border:1px solid var(--border,#ccc);border-radius:6px;">` +
-            `<div style="display:flex;justify-content:space-between;align-items:center;">` +
-            `<strong>${escapeHtml(p.name || pid)}</strong>` +
-            `<label><input type="checkbox" data-action="toggleProvider" data-id="${escapeHtml(pid)}"${enabled ? ' checked' : ''}> Enabled</label>` +
+        const sel = p.id === selected.id;
+        const badge = p.type === 'ollama' ? 'local' : (p.type === 'openrouter' ? 'aggregator' : 'cloud');
+        html += `<button type="button" data-action="selectProvider" data-id="${escapeHtml(p.id)}" style="text-align:left;padding:0.75rem;border:2px solid ${sel ? 'var(--accent,#f97316)' : 'var(--border,#ccc)'};background:${sel ? 'rgba(249,115,22,0.08)' : 'transparent'};border-radius:8px;cursor:pointer;">` +
+            `<div style="font-weight:600;">${escapeHtml(p.name)}</div>` +
+            `<span style="font-size:0.75rem;padding:0.1rem 0.4rem;border-radius:4px;background:#eee;">${escapeHtml(badge)}</span>` +
+            (p.type === 'ollama' ? ` <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.enabled ? 'green' : 'gray'};margin-left:4px;"></span>` : '') +
+            `</button>`;
+    }
+    html += `</div>`;
+    // form
+    html += `<div style="max-width:40rem;">`;
+    if (!isOllama) {
+        const statusColor = form.keyStatus === 'ok' ? 'green' : (form.keyStatus === 'error' ? 'red' : 'gray');
+        html += `<div style="margin-bottom:0.75rem;">` +
+            `<label style="display:block;font-weight:500;margin-bottom:0.25rem;">API Key <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${statusColor};margin-left:4px;"></span></label>` +
+            `<div style="display:flex;gap:0.5rem;">` +
+            `<input id="prov-key-${escapeHtml(selected.id)}" type="${form.showKey ? 'text' : 'password'}" value="${escapeHtml(form.apiKey)}" placeholder="sk-..." style="flex:1;padding:0.5rem;" oninput="state.providerForms['${selected.id}'].apiKey=this.value">` +
+            `<button type="button" class="btn" data-action="toggleKey" data-id="${escapeHtml(selected.id)}">${form.showKey ? 'Hide' : 'Show'}</button>` +
+            `<button type="button" class="btn" data-action="checkKey" data-id="${escapeHtml(selected.id)}"${testing ? ' disabled' : ''}>${testing ? 'Checking…' : 'Check Key'}</button>` +
             `</div>` +
-            `<div class="form-grid" style="margin-top:0.5rem;">` +
-            `<label class="form-field"><span>Base URL</span><input id="prov-url-${escapeHtml(pid)}" type="text" value="${escapeHtml(baseUrl)}" spellcheck="false"></label>` +
-            `<label class="form-field"><span>API Key${hasKey ? ' (set)' : ''}</span><input id="prov-key-${escapeHtml(pid)}" type="password" placeholder="${hasKey ? '•••• (leave empty to keep)' : ''}"></label>` +
-            `<label class="form-field"><span>Default model</span><select id="prov-model-${escapeHtml(pid)}"><option value="">${escapeHtml(STRINGS.selectModel)}</option>${modelOptions}</select></label>` +
-            `</div>` +
-            `<div class="panel-actions" style="margin-top:0.5rem;">` +
-            `<button type="button" class="btn btn-primary" data-action="saveProvider" data-id="${escapeHtml(pid)}"${saving ? ' disabled' : ''}>Save</button>` +
-            `<button type="button" class="btn" data-action="testProvider" data-id="${escapeHtml(pid)}"${testing ? ' disabled' : ''}>${testing ? 'Testing…' : 'Test'}</button>` +
-            `<button type="button" class="btn" data-action="refreshProviderModels" data-id="${escapeHtml(pid)}">Refresh models</button>` +
-            (p.builtIn ? '' : `<button type="button" class="btn btn-danger" data-action="deleteProvider" data-id="${escapeHtml(pid)}">Delete</button>`) +
-            `</div>` +
+            (keyUrl ? `<p style="font-size:0.75rem;margin-top:0.25rem;">Get key: <a href="${escapeHtml(keyUrl)}" target="_blank">${escapeHtml(keyUrl)}</a></p>` : '') +
+            `</div>`;
+    } else {
+        html += `<div style="margin-bottom:0.75rem;">` +
+            `<label style="display:block;font-weight:500;margin-bottom:0.25rem;">Base URL</label>` +
+            `<input id="prov-url-${escapeHtml(selected.id)}" type="text" value="${escapeHtml(selected.baseUrl || 'http://localhost:11434')}" style="width:100%;padding:0.5rem;">` +
+            `<button type="button" class="btn" data-action="testProvider" data-id="${escapeHtml(selected.id)}"${testing ? ' disabled' : ''}>${testing ? 'Testing…' : 'Test connection'}</button>` +
             `</div>`;
     }
-    inner += `<div class="panel-actions"><button type="button" class="btn" data-action="addCustomProvider">Add Custom provider</button></div>`;
-    inner += `</section>`;
-    return inner;
+    // Advanced base URL for non-ollama
+    if (!isOllama) {
+        html += `<details style="margin-bottom:0.75rem;"><summary>Advanced</summary>` +
+            `<label style="display:block;font-weight:500;margin:0.5rem 0 0.25rem;">Base URL</label>` +
+            `<input id="prov-url-${escapeHtml(selected.id)}" type="text" value="${escapeHtml(selected.baseUrl || '')}" style="width:100%;padding:0.5rem;">` +
+            `</details>`;
+    }
+    // Model select
+    const modelOptions = models.map((m) => {
+        const id = (typeof m === 'string') ? m : (m.id || m.name || '');
+        return `<option value="${escapeHtml(id)}"${id === selected.defaultModel ? ' selected' : ''}>${escapeHtml(id)}</option>`;
+    }).join('');
+    html += `<div style="margin-bottom:0.75rem;">` +
+        `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.25rem;">` +
+        `<label style="font-weight:500;">Select Model</label>` +
+        `<span style="font-size:0.75rem;">Updated: ${selected.modelsSyncedAt ? new Date(selected.modelsSyncedAt).toLocaleString() : 'Never updated'}</span>` +
+        `<button type="button" class="btn" data-action="refreshProviderModels" data-id="${escapeHtml(selected.id)}">Refresh</button>` +
+        `</div>` +
+        `<select id="prov-model-${escapeHtml(selected.id)}" style="width:100%;padding:0.5rem;">` +
+        `<option value="">Select model</option>${modelOptions}</select>` +
+        `<div style="margin-top:0.5rem;"><button type="button" class="btn" data-action="addModelManual" data-id="${escapeHtml(selected.id)}">+ Add model manually</button></div>` +
+        `</div>`;
+    // save
+    html += `<div class="panel-actions" style="margin-top:1rem;">` +
+        `<button type="button" class="btn btn-primary" data-action="saveProvider" data-id="${escapeHtml(selected.id)}"${saving ? ' disabled' : ''}>Save</button>` +
+        `</div>`;
+    html += `</div>`;
+    // version
+    html += `<p style="margin-top:1rem;font-size:0.75rem;color:#888;">Version: 1.0.0</p>`;
+    if (ps.notice) html = `<div class="notice-banner" role="status">${escapeHtml(ps.notice)}</div>` + html;
+    return html;
 }
 
 /** A profile form field's HTML (single-line inputs; "Other" is a multi-line text area). */
@@ -2527,6 +2623,21 @@ function onRootClick(event) {
             testConnection();
         } else if (action === 'toggleProvider') {
             toggleProviderEnabled(id, actionButton.checked);
+        } else if (action === 'settingsTab') {
+            state.settingsTab = id;
+            render();
+        } else if (action === 'selectProvider') {
+            state.selectedProvider = id;
+            if (!state.providerForms[id]) state.providerForms[id] = { apiKey: '', showKey: false, keyStatus: 'unchecked' };
+            render();
+        } else if (action === 'toggleKey') {
+            if (!state.providerForms[id]) state.providerForms[id] = { apiKey: '', showKey: false, keyStatus: 'unchecked' };
+            state.providerForms[id].showKey = !state.providerForms[id].showKey;
+            render();
+        } else if (action === 'checkKey') {
+            checkKeyCard(id);
+        } else if (action === 'addModelManual') {
+            addModelManual(id);
         } else if (action === 'saveProvider') {
             saveProviderCard(id);
         } else if (action === 'testProvider') {
