@@ -25,7 +25,10 @@ class OllamaProvider(Provider):
 
 
     def model_capabilities(self, model):
-        model_show = ollama_show(self.pool_manager, model, self.config.get('baseUrl'))
+        try:
+            model_show = ollama_show(self.pool_manager, model, self.config.get('baseUrl'))
+        except Exception:  # pylint: disable=broad-exception-caught
+            return {'tools': False, 'vision': False, 'thinking': False}
         capabilities = model_show.get('capabilities') or []
         return {
             'tools': 'tools' in capabilities,

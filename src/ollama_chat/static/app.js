@@ -705,7 +705,8 @@ async function saveProviderCard(id) {
         state.providers.notice = 'Saved';
         if (state.providerForms[id]) state.providerForms[id].apiKey = '';
         // Make the saved provider + chosen model the active selection for new chats
-        const chosenModel = (modelSelect && modelSelect.value) ? modelSelect.value : (body.defaultModel || '');
+        const chosenModel = (modelSelect && modelSelect.value) ? modelSelect.value :
+            (body.defaultModel || (state.providers.models[id] && state.providers.models[id].length ? (state.providers.models[id][0].id || state.providers.models[id][0]) : '') || state.selectedModel || '');
         if (chosenModel) {
             state.selectedProvider = id;
             state.selectedModel = chosenModel;
