@@ -1621,7 +1621,7 @@ function buildSettingsHtml() {
     const tabs = `<div class="settings-tabs" style="display:flex;gap:0.5rem;margin-bottom:1rem;border-bottom:1px solid var(--border,#ccc);">` +
         `<button type="button" class="btn${state.settingsTab === 'general' ? ' btn-primary' : ''}" data-action="settingsTab" data-id="general">General</button>` +
         `<button type="button" class="btn${state.settingsTab === 'ai' ? ' btn-primary' : ''}" data-action="settingsTab" data-id="ai">AI</button>` +
-        `<button type="button" class="btn${state.settingsTab === 'users' ? ' btn-primary' : ''}" data-action="settingsTab" data-id="users">Users</button>` +
+        `<button type="button" class="btn${state.settingsTab === 'profile' ? ' btn-primary' : ''}" data-action="settingsTab" data-id="profile">Profile</button>` +
         `</div>`;
     let inner = tabs;
     if (state.settingsTab === 'general') {
@@ -1675,6 +1675,8 @@ function buildSettingsHtml() {
         inner += banners + workspaceHtml + gmailHtml;
     } else if (state.settingsTab === 'ai') {
         inner += buildAiTabHtml();
+    } else if (state.settingsTab === 'profile') {
+        inner += buildProfileHtml();
     } else {
         inner += `<section class="panel"><p>Users management placeholder.</p></section>`;
     }
@@ -1714,10 +1716,10 @@ function buildAiTabHtml() {
     for (const p of list) {
         const sel = p.id === selected.id;
         const badge = p.type === 'ollama' ? 'local' : (p.type === 'openrouter' ? 'aggregator' : 'cloud');
-        html += `<button type="button" data-action="selectProvider" data-id="${escapeHtml(p.id)}" style="text-align:left;padding:0.75rem;border:2px solid ${sel ? 'var(--accent,#f97316)' : 'var(--border,#ccc)'};background:${sel ? 'rgba(249,115,22,0.08)' : 'transparent'};border-radius:8px;cursor:pointer;">` +
+        html += `<button type="button" data-action="selectProvider" data-id="${escapeHtml(p.id)}" style="text-align:left;padding:0.75rem;border:2px solid ${sel ? 'var(--accent,#f97316)' : 'var(--border,#ccc)'};background:${sel ? 'rgba(249,115,22,0.08)' : 'transparent'};cursor:pointer;">` +
             `<div style="font-weight:600;">${escapeHtml(p.name)}</div>` +
-            `<span style="font-size:0.75rem;padding:0.1rem 0.4rem;border-radius:4px;background:#eee;">${escapeHtml(badge)}</span>` +
-            (p.type === 'ollama' ? ` <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.enabled ? 'green' : 'gray'};margin-left:4px;"></span>` : '') +
+            `<span style="font-size:0.75rem;padding:0.1rem 0.4rem;background:#eee;">${escapeHtml(badge)}</span>` +
+            (p.type === 'ollama' ? ` <span style="display:inline-block;width:8px;height:8px;background:${p.enabled ? 'green' : 'gray'};margin-left:4px;"></span>` : '') +
             `</button>`;
     }
     html += `</div>`;
@@ -1726,7 +1728,7 @@ function buildAiTabHtml() {
     if (!isOllama) {
         const statusColor = form.keyStatus === 'ok' ? 'green' : (form.keyStatus === 'error' ? 'red' : 'gray');
         html += `<div style="margin-bottom:0.75rem;">` +
-            `<label style="display:block;font-weight:500;margin-bottom:0.25rem;">API Key <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${statusColor};margin-left:4px;"></span></label>` +
+            `<label style="display:block;font-weight:500;margin-bottom:0.25rem;">API Key <span style="display:inline-block;width:8px;height:8px;background:${statusColor};margin-left:4px;"></span></label>` +
             `<div style="display:flex;gap:0.5rem;">` +
             `<input id="prov-key-${escapeHtml(selected.id)}" type="${form.showKey ? 'text' : 'password'}" value="${escapeHtml(form.apiKey)}" placeholder="sk-..." style="flex:1;padding:0.5rem;" oninput="state.providerForms['${selected.id}'].apiKey=this.value">` +
             `<button type="button" class="btn" data-action="toggleKey" data-id="${escapeHtml(selected.id)}">${form.showKey ? 'Hide' : 'Show'}</button>` +
@@ -2272,7 +2274,7 @@ function buildSidebarHtml(theme) {
         `<a class="nav-item${routeName === 'new' ? ' active' : ''}" href="#/">${ICONS.newChat}<span>${escapeHtml(STRINGS.navChat)}</span></a>` +
         `<a class="nav-item${routeName === 'settings' ? ' active' : ''}" href="#/settings">${ICONS.gear}<span>${escapeHtml(STRINGS.navSettings)}</span></a>` +
         `<a class="nav-item${routeName === 'tasks' ? ' active' : ''}" href="#/tasks">${ICONS.checklist}<span>${escapeHtml(STRINGS.navTasks)}</span></a>` +
-        `<a class="nav-item${routeName === 'profile' ? ' active' : ''}" href="#/profile">${ICONS.user}<span>${escapeHtml(STRINGS.navProfile)}</span></a>` +
+
         `</nav>` +
         (work ? `<p class="workspace-label" title="${escapeHtml(state.workspace)}">${ICONS.folder}<span>${escapeHtml(work)}</span></p>` : '') +
         `<div class="chat-list" id="chat-list">${buildSidebarListHtml()}</div>` +
@@ -2625,7 +2627,11 @@ function onRootClick(event) {
             toggleProviderEnabled(id, actionButton.checked);
         } else if (action === 'settingsTab') {
             state.settingsTab = id;
-            render();
+            if (id === 'profile' && (!state.profile || !state.profile.data)) {
+                loadProfile();
+            } else {
+                render();
+            }
         } else if (action === 'selectProvider') {
             state.selectedProvider = id;
             if (!state.providerForms[id]) state.providerForms[id] = { apiKey: '', showKey: false, keyStatus: 'unchecked' };
