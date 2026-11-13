@@ -18,7 +18,7 @@ import types
 import uuid
 
 from .memory import MEMORY_LIMIT_DEFAULT, memory_context, workspace_dir
-from .providers.registry import create_provider
+from .providers.registry import create_provider, provider_config
 
 
 # The tools a scheduled task may have in its tools list. The read-only tools are the default;
@@ -351,8 +351,19 @@ def _run_task(pool_manager, workspace, task, memory_limit=MEMORY_LIMIT_DEFAULT, 
     if not model:
         raise ValueError(f'task "{task["id"]}" has no model')
 
-    # The task's provider - old tasks have no provider and fall back to local Ollama
-    provider = create_provider(task.get('provider'), pool_manager, crypto=getattr(pool_manager, 'crypto', None))    # The messages - workspace memory context plus the task prompt
+    # The task's provider - old tasks have no provider and fall back to local Ollama.
+    # Resolve the provider's config entry from the app (when available) so cloud providers
+    # keep their base URL and encrypted API key.
+    provider_id = task.get('provider')
+    app = getattr(pool_manager, 'app', None)
+    if app is not None:
+        with app.config() as config:
+            provider_entry = provider_config(config, provider_id)
+        crypto = getattr(app, 'crypto', None) or getattr(pool_manager, 'crypto', None)
+    else:
+        provider_entry = provider_config({}, provider_id)
+        crypto = getattr(pool_manager, 'crypto', None)
+    provider = create_provider(provider_id, pool_manager, provider_entry, crypto=crypto)    # The messages - workspace memory context plus the task prompt
     prompt = str(task.get('prompt') or '')
     messages = []
     memory_text = memory_context(workspace, prompt, memory_limit)
@@ -503,8 +514,10 @@ class TaskManager():
 
     def __init__(self, app):
         self.app = app
-        # Carry the app's crypto on the pool manager so provider adapters can decrypt keys
+        # Carry the app and its crypto on the pool manager so provider adapters can resolve
+        # the provider's config entry and decrypt its API key
         try:
+            self.app.pool_manager.app = self.app
             self.app.pool_manager.crypto = self.app.crypto
         except Exception:  # pylint: disable=broad-exception-caught
             pass

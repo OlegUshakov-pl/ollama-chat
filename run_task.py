@@ -65,8 +65,13 @@ def main(argv=None):
     # Run the task
     workspace = str(workspace_dir(config))
     pool_manager = urllib3.PoolManager(num_pools=10, maxsize=10)
-    from ollama_chat.providers.crypto import CryptoManager  # noqa: E402
-    pool_manager.crypto = CryptoManager(config_path)
+    try:
+        from ollama_chat.app import OllamaChat  # noqa: E402
+        app = OllamaChat(config_path)
+        pool_manager.app = app
+        pool_manager.crypto = app.crypto
+    except Exception:  # pylint: disable=broad-exception-caught
+        pass
     try:
         report = run_stored_task(workspace, pool_manager, args.id)
     except ValueError as exc:
