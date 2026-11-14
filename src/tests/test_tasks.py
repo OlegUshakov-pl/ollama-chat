@@ -23,6 +23,7 @@ from .util import create_test_files
 
 # A task manager app proxy for unit tests
 class TestApp():
+    __test__ = False  # Not a pytest test class
     __slots__ = ('config_dict', 'pool_manager')
 
 

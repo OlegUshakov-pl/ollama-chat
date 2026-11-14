@@ -13,8 +13,9 @@ import unittest
 from unittest import mock
 
 from ollama_chat.email_tools import (
-    _load_env, check_email, get_email_settings, save_email_settings, send_email, test_email_connection
+    _load_env, check_email, get_email_settings, save_email_settings, send_email
 )
+from ollama_chat.email_tools import test_email_connection as _test_email_connection
 
 from .util import create_test_files
 
@@ -473,7 +474,7 @@ class TestEmailSettings(unittest.TestCase):
             imap = _FakeIMAP()
             with mock.patch('ollama_chat.email_tools.imaplib.IMAP4_SSL', return_value=imap), \
                  mock.patch('ollama_chat.email_tools.smtplib.SMTP_SSL', _FakeSMTP):
-                message = test_email_connection(temp_dir)
+                message = _test_email_connection(temp_dir)
             self.assertEqual(message, 'IMAP: logged in to imap.example.com:993; SMTP: logged in to smtp.example.com:465')
             self.assertTrue(imap.logged_out)
             smtp = _FakeSMTP.instances[-1]
@@ -489,7 +490,7 @@ class TestEmailSettings(unittest.TestCase):
                 with mock.patch('ollama_chat.email_tools.imaplib.IMAP4_SSL', return_value=imap), \
                      mock.patch('ollama_chat.email_tools.smtplib.SMTP_SSL', side_effect=OSError('refused')):
                     with self.assertRaises(ValueError) as caught:
-                        test_email_connection(temp_dir)
+                        _test_email_connection(temp_dir)
                 self.assertIn('IMAP: ', str(caught.exception))
                 self.assertIn('SMTP: ', str(caught.exception))
             finally:
@@ -499,5 +500,5 @@ class TestEmailSettings(unittest.TestCase):
     def test_test_email_connection_missing_config(self):
         with create_test_files([]) as temp_dir:
             with self.assertRaises(ValueError) as caught:
-                test_email_connection(temp_dir)
+                _test_email_connection(temp_dir)
             self.assertIn('Email is not configured', str(caught.exception))

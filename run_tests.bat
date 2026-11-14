@@ -1,3 +1,7 @@
 @echo off
 set PYTHONPATH=src
-python -m pytest src/tests/test_tasks.py -v > test_output.txt 2>&1
+if exist .venv\Scripts\python.exe (
+    .venv\Scripts\python.exe -m pytest src/tests -v > test_output.txt 2>&1
+) else (
+    python -m pytest src/tests -v > test_output.txt 2>&1
+)
