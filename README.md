@@ -18,7 +18,8 @@
 - **Web search (tool calling)** — globe button left of the thinking paw. Sends `{"search": true|false}`, the back-end hands Ollama two tools (`web_search`, `fetch_page`) and runs the `tool_calls` loop (max 5 rounds per answer) → `ChatManager(search=...)` → `ollama_chat(..., tools=...)` (`src/ollama_chat/web_tools.py`, `src/ollama_chat/chat.py`). Persisted in `localStorage` (`ollama-chat-websearch`), off by default. Active class `icon-btn websearch-active`; used tools are shown as a collapsible block in the chat.
 - **File attachments** — upload button in composer, **up to 10 files per message** (selected files accumulate, each chip has a remove button, `3 / 10` counter). Supported: `txt`, `md`, `docx`, `png`, `jpg`, `jpeg`. Text is appended to user message, `docx` parsed with `python-docx`, images sent as base64 `images` (`src/ollama_chat/chat.py:67`, `src/ollama_chat/static/app.js:149`). Attached file names are stored on the exchange (`ConversationFileRef`) and shown as chips above each user message, sending with empty text allowed.
 - **Markdown viewer (.md preview in chat)** — button next to theme toggle in sidebar toolbar. Opens system file picker (`accept=".md,.markdown"`), reads file with `FileReader` and renders it **inside the chat area** via `marked` + `DOMPurify` (`src/ollama_chat/static/app.js:505`, `src/ollama_chat/static/app.css:987`). Header shows filename + `Close preview` button, `Esc` also closes. No upload to server, works offline.
-- **SVG preview in chat** — a fenced SVG code block (or any block whose source starts with `<svg`) is drawn as the picture instead of showing its source. The markup is sanitized with `DOMPurify`: scripts, event handlers, `foreignObject` and non-local `href` / `url()` references are dropped, a `viewBox`-only SVG scales to the message column. Python blocks get a light syntax highlight (keywords, strings, comments, numbers, decorators) — view only, nothing is executed (`src/ollama_chat/static/app.js:1486`, `src/ollama_chat/static/app.css:222`).
+- **SVG preview in chat** — a fenced SVG code block (or any block whose source starts with `<svg`) is drawn as the picture instead of showing its source. The markup is sanitized with `DOMPurify`: scripts, event handlers, `foreignObject` and non-local `href` / `url()` references are dropped, a `viewBox`-only SVG scales to the message column. Python blocks get a light syntax highlight (keywords, strings, comments, numbers, decorators) — view only, nothing is executed (`src/ollama_chat/static/app.js:1489`, `src/ollama_chat/static/app.css:222`).
+- **Image viewer for model replies** — markdown images in an answer are shown enlarged and centered in the message; clicking one opens a lightbox with the full-size picture, its caption and an `Open original` link (for `http(s)` sources). `Esc`, the backdrop or the close button dismisses it; it also closes on navigation (`src/ollama_chat/static/app.js:1720`, `src/ollama_chat/static/app.css:241`).
 - **Reliable rename** — `Rename` in chat menu now updates both sidebar and open header instantly and awaits `POST /setConversationTitle` before navigation (`src/ollama_chat/static/app.js:885`, `src/ollama_chat/static/ollamaChatConversation.bare:312`).
 - **One-click Windows launch — `start.bat` / `install.bat`** — `install.bat` clones to clean folder + creates `.venv`, `start.bat` creates `.venv` if missing and forwards all args to `ollama-chat` (e.g. `start.bat -p 8080`).
 - **Workspace & long-term memory** — a directory on disk (`~/ollama-chat-workspace` by default) holding `USER.md` (about the user) and `MEMORY.md` (durable notes). The memory is injected into the system prompt for every model turn (`src/ollama_chat/memory.py`), managed from the chat with `/memory`, `/remember`, `/forget`. Set on the **Settings** page (`#/settings`) or via the `OLLAMA_CHAT_WORKSPACE` env var.
@@ -89,6 +90,7 @@ ollama-chat -t askAristotle -v question "Why is the sky blue?"
 - **File uploads** — up to 10 files per message (`txt`/`md`/`docx` as text, `png`/`jpg`/`jpeg` as images)
 - **Markdown viewer** — open local `.md` files in chat area, rendered safely
 - **SVG preview** — `svg` code blocks are drawn as a picture (sanitized), Python blocks are syntax-highlighted
+- **Image viewer** — model reply images render enlarged; click opens a lightbox with the original link
 - **Rename / Delete / Download .md / Regenerate** per chat
 - Prompt commands `/file`, `/dir`, `/image`, `/url`, `/memory`, `/remember`, `/forget`, `/do`, `/?`, `/tasks`, `/task`
 - **Workspace memory** (`USER.md` + `MEMORY.md`) injected into every model turn
@@ -132,13 +134,20 @@ Click upload icon → select one or more files (up to 10, `multiple`) → each f
 4. `Close preview` button or `Esc` or navigation clears `state.mdViewer` and returns to chat. State is in-memory only, not sent to server. Code blocks get language label + copy button via `enhanceCodeBlocks()`.
 
 ### SVG and code blocks
-`enhanceCodeBlocks()` (`src/ollama_chat/static/app.js:1486`) post-processes every rendered `<pre>` in the chat:
+`enhanceCodeBlocks()` (`src/ollama_chat/static/app.js:1489`) post-processes every rendered `<pre>` in the chat:
 
 - **SVG** — a block tagged `svg`, or a block whose text starts with `<svg`, is replaced by the drawn picture (`.svg-preview`, no source shown). The source is sanitized with `DOMPurify` (`buildSvgPreview()`): `<script>`, event handlers and `foreignObject` are removed, `href`/`xlink:href`/`src` must be a `#fragment` or a `data:image/*` URL, and inline `<style>` loses `@import` and non-local `url(...)`. A `<svg>` with a `viewBox` but no size fills the message column; the box is capped at `70vh`. If the source does not parse to an `<svg>` element, the normal code block is kept.
 - **Python** — `python` / `py` blocks get a light syntax highlight (`highlightPython()`): keywords, strings (incl. triple-quoted and f-strings), comments, decorators and numbers, coloured with the `--tok-*` theme variables. The text is never modified, so the copy button still copies the plain source.
 - Everything else keeps the language label + copy button.
 
 Raw `<svg>` written inline in the markdown (outside a code block) is already rendered by `renderMarkdown()`'s `DOMPurify` pass.
+
+### Images in replies
+Markdown images in a model answer (`![alt](http…)` or `![alt](data:image/…)`) are already produced by `marked` + `DOMPurify`; `app.css` now shows them enlarged and centered (`.md img`, capped at `60vh`, framed). Clicking one calls `openImageLightbox()` (`src/ollama_chat/static/app.js:1720`):
+
+- the overlay is appended to `document.body`, so message re-renders during polling do not close it;
+- the bar under the picture shows the image `alt` and an `Open original` link (`target="_blank"`, `rel="noopener noreferrer"`) when the source is a plain `http(s)` URL — `data:` sources get no link;
+- close with `Esc` (`onKeyDown`), a click on the backdrop or the ✕ button; navigating to another chat closes it too (`onHashChange`).
 
 ### Prompt commands
 Implemented in `src/ollama_chat/chat.py`:

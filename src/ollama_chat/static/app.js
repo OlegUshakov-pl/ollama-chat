@@ -53,6 +53,8 @@ const STRINGS = {
     deleteResponseLabel: 'Delete response',
     codeLabel: 'code',
     svgPreviewLabel: 'SVG preview',
+    imageViewerLabel: 'Image viewer',
+    imageOpenOriginal: 'Open original',
     thinkingOn: 'Thinking on',
     thinkingOff: 'Thinking off',
     webSearchOn: 'Web search on',
@@ -199,6 +201,7 @@ const ICONS = {
     play: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 9-14 9Z"/></svg>',
     folder: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h5l2 2h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>',
     edit: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+    close: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
 };
 
 /** The tool-call round limit options the composer's tool-rounds button cycles through. */
@@ -1699,6 +1702,75 @@ async function copyCode(button, node) {
     }
 }
 
+/** Close the enlarged image view. Returns true when one was open. */
+function closeImageLightbox() {
+    const box = document.querySelector ? document.querySelector('.img-lightbox') : null;
+    if (!box) {
+        return false;
+    }
+    box.remove();
+    return true;
+}
+
+/**
+ * Show a model reply's markdown image enlarged. Clicking the backdrop or Esc closes it; a plain
+ * http(s) source gets an "Open original" link. The overlay lives on document.body so message
+ * re-renders (polling) do not tear it down.
+ */
+function openImageLightbox(img) {
+    closeImageLightbox();
+    const src = img && img.getAttribute ? (img.getAttribute('src') || '') : '';
+    if (!src) {
+        return;
+    }
+    const alt = (img.getAttribute('alt') || '').trim();
+
+    const box = document.createElement('div');
+    box.className = 'img-lightbox';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-label', alt || STRINGS.imageViewerLabel);
+
+    const picture = document.createElement('img');
+    picture.src = src;
+    picture.alt = alt;
+    box.appendChild(picture);
+
+    const bar = document.createElement('div');
+    bar.className = 'img-lightbox-bar';
+    if (alt) {
+        const caption = document.createElement('span');
+        caption.className = 'img-lightbox-alt';
+        caption.textContent = alt;
+        bar.appendChild(caption);
+    }
+    if (/^https?:\/\//i.test(src)) {
+        const link = document.createElement('a');
+        link.className = 'img-lightbox-open';
+        link.href = src;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = STRINGS.imageOpenOriginal;
+        bar.appendChild(link);
+    }
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'icon-btn img-lightbox-close';
+    close.setAttribute('aria-label', STRINGS.close);
+    close.innerHTML = ICONS.close;
+    close.addEventListener('click', () => closeImageLightbox());
+    bar.appendChild(close);
+    box.appendChild(bar);
+
+    box.addEventListener('click', (event) => {
+        if (event.target === box) {
+            closeImageLightbox();
+        }
+    });
+
+    document.body.appendChild(box);
+    close.focus();
+}
+
 async function copyExchange(button, ix) {
     const conv = state.current && state.current.conversation;
     const exchange = conv && (conv.exchanges || [])[ix];
@@ -2701,6 +2773,7 @@ function scheduleSidebarPoll() {
 function onHashChange() {
     stopPolling();
     stopTasksPolling();
+    closeImageLightbox();
     state.route = parseRoute();
     state.openMenuId = null;
     state.modal = null;
@@ -2892,6 +2965,13 @@ function onRootClick(event) {
         }
         return;
     }
+    // A markdown image in a model reply opens the enlarged view
+    const mdImage = event.target.closest ? event.target.closest('.md img') : null;
+    if (mdImage) {
+        event.preventDefault();
+        openImageLightbox(mdImage);
+        return;
+    }
     if (event.target.id === 'menu-overlay') {
         state.openMenuId = null;
         state.modelMenuOpen = false;
@@ -2996,6 +3076,9 @@ function onRootBlur(event) {
 
 function onKeyDown(event) {
     if (event.key === 'Escape') {
+        if (closeImageLightbox()) {
+            return;
+        }
         if (state.modal) {
             state.modal = null;
             render();
