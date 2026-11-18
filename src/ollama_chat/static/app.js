@@ -52,6 +52,7 @@ const STRINGS = {
     regenerateLabel: 'Regenerate',
     deleteResponseLabel: 'Delete response',
     codeLabel: 'code',
+    svgPreviewLabel: 'SVG preview',
     thinkingOn: 'Thinking on',
     thinkingOff: 'Thinking off',
     webSearchOn: 'Web search on',
@@ -1499,6 +1500,17 @@ function enhanceCodeBlocks(container) {
                 lang = match[1];
             }
         }
+
+        // SVG blocks are drawn as a picture instead of showing their source
+        const source = (code || pre).textContent || '';
+        if (isSvgSource(lang, source)) {
+            const preview = buildSvgPreview(source);
+            if (preview && pre.parentNode) {
+                pre.parentNode.replaceChild(preview, pre);
+                return;
+            }
+        }
+
         const wrap = document.createElement('div');
         wrap.className = 'codeblock';
         const head = document.createElement('div');
@@ -1517,7 +1529,126 @@ function enhanceCodeBlocks(container) {
         pre.parentNode.insertBefore(wrap, pre);
         wrap.appendChild(head);
         wrap.appendChild(pre);
+
+        // Python blocks get a light syntax highlight (view only)
+        if (code && (lang === 'python' || lang === 'py')) {
+            highlightPython(code);
+        }
     });
+}
+
+/** True when a fenced block holds SVG source - by language tag or by its own content. */
+function isSvgSource(lang, source) {
+    const language = String(lang || '').toLowerCase();
+    const text = String(source || '');
+    return language === 'svg' || /^\s*(?:<\?xml[\s\S]*?\?>\s*)?(?:<!DOCTYPE svg[^>]*>\s*)?<svg[\s>]/i.test(text);
+}
+
+/**
+ * Build a sanitized inline <svg> element from SVG source, or null when the source does not
+ * parse to one. Scripts, event handlers, foreign HTML and external references are stripped.
+ */
+function buildSvgPreview(source) {
+    if (!window.DOMPurify || !document.createElement) {
+        return null;
+    }
+    const clean = window.DOMPurify.sanitize(String(source || ''), {
+        FORBID_TAGS: ['foreignObject', 'iframe', 'object', 'embed', 'script', 'link', 'meta', 'base'],
+        FORBID_ATTR: ['srcset', 'formaction'],
+    });
+    const host = document.createElement('div');
+    host.innerHTML = clean;
+    const svg = host.querySelector('svg');
+    if (!svg) {
+        return null;
+    }
+
+    // Keep only local references: "#..." fragments and data:image/* data URLs
+    const nodes = [svg].concat(Array.from(svg.querySelectorAll('*')));
+    nodes.forEach((node) => {
+        ['href', 'xlink:href', 'src'].forEach((attr) => {
+            const value = node.getAttribute ? node.getAttribute(attr) : null;
+            if (value !== null && !/^\s*(?:#|data:image\/)/i.test(value)) {
+                node.removeAttribute(attr);
+            }
+        });
+        if (node.tagName && String(node.tagName).toLowerCase() === 'style' && node.textContent) {
+            node.textContent = sanitizeSvgCss(node.textContent);
+        }
+    });
+
+    // A viewBox without an explicit size scales with the message column
+    if (svg.hasAttribute('viewBox')) {
+        if (!svg.hasAttribute('width')) {
+            svg.style.width = '100%';
+        }
+        if (!svg.hasAttribute('height')) {
+            svg.style.height = 'auto';
+        }
+    }
+
+    const wrap = document.createElement('div');
+    wrap.className = 'svg-preview';
+    wrap.setAttribute('role', 'img');
+    wrap.setAttribute('aria-label', STRINGS.svgPreviewLabel);
+    wrap.appendChild(svg);
+    return wrap;
+}
+
+/** Drop @import and non-local url(...) references from an SVG's inline CSS. */
+function sanitizeSvgCss(cssText) {
+    return String(cssText)
+        .replace(/@import[^;]*;?/gi, '')
+        .replace(/url\(\s*(?:"[^"]*"|'[^']*'|[^)'"]*)\s*\)/gi, (match) => {
+            return /^\s*url\(\s*['"]?(?:#|data:image\/)/i.test(match) ? match : 'none';
+        });
+}
+
+/** The Python keywords highlighted in python code blocks. */
+const PYTHON_KEYWORDS = [
+    'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue',
+    'def', 'del', 'elif', 'else', 'except', 'finally', 'for', 'from', 'global', 'if', 'import', 'in',
+    'is', 'lambda', 'match', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try', 'while',
+    'with', 'yield'
+];
+
+/** Comment | string (incl. triple-quoted and prefixed) | decorator | keyword | number. */
+const PYTHON_TOKEN_RE = new RegExp(
+    '(#[^\\n]*)' +
+    '|("""[\\s\\S]*?"""|\'\'\'[\\s\\S]*?\'\'\'|[rbfuRBFU]{0,2}(?:"(?:\\\\.|[^"\\\\\\n])*"|\'(?:\\\\.|[^\'\\\\\\n])*\'))' +
+    '|(@[A-Za-z_][\\w.]*)' +
+    '|\\b(' + PYTHON_KEYWORDS.join('|') + ')\\b' +
+    '|\\b(\\d[\\d_]*(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\b',
+    'g'
+);
+
+/** Light Python syntax highlighting of a <code> element's text (escaped pieces only). */
+function highlightPython(codeEl) {
+    if (!codeEl || codeEl.dataset.hl || typeof codeEl.textContent !== 'string') {
+        return;
+    }
+    const text = codeEl.textContent;
+    if (!text) {
+        return;
+    }
+    let html = '';
+    let last = 0;
+    PYTHON_TOKEN_RE.lastIndex = 0;
+    let match = PYTHON_TOKEN_RE.exec(text);
+    while (match) {
+        html += escapeHtml(text.slice(last, match.index));
+        const cls = match[1] ? 'tok-com'
+            : match[2] ? 'tok-str'
+            : match[3] ? 'tok-dec'
+            : match[4] ? 'tok-key'
+            : 'tok-num';
+        html += `<span class="${cls}">${escapeHtml(match[0])}</span>`;
+        last = match.index + match[0].length;
+        match = PYTHON_TOKEN_RE.exec(text);
+    }
+    html += escapeHtml(text.slice(last));
+    codeEl.innerHTML = html;
+    codeEl.dataset.hl = '1';
 }
 
 async function copyText(text) {
