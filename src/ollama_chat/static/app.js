@@ -2544,6 +2544,7 @@ async function loadConversation(id) {
         state.current.generating = Boolean(data.conversation.generating);
         render();
         scrollMessagesToBottom();
+        await syncConversationModel();
         if (state.current.generating) {
             schedulePoll();
         }
@@ -2578,6 +2579,8 @@ async function pollTick() {
             schedulePoll();
         } else if (wasGenerating) {
             await refreshConversations();
+            // The settings' model may have changed while the reply was generating
+            await syncConversationModel();
         }
     } catch (err) {
         cur.error = err.message;
@@ -2597,6 +2600,39 @@ async function loadModels() {
     }
     if (data.model && !state.selectedModel) {
         state.selectedModel = data.model;
+    }
+}
+
+/**
+ * Keep the open chat on the model chosen on the Settings page: when a conversation is loaded (or
+ * right after a reply finishes) and the settings' model differs, the conversation is switched to
+ * it. No-op when no chat is open, when the models already match, or while the chat is generating.
+ */
+async function syncConversationModel() {
+    if (state.route.name !== 'chat' || !state.current || !state.current.conversation) {
+        return;
+    }
+    const conversation = state.current.conversation;
+    const model = state.selectedModel;
+    if (!model || !conversation.model || conversation.model === model) {
+        return;
+    }
+    if (state.current.generating || state.sending) {
+        return;
+    }
+    try {
+        await apiPost('setConversationModel', {
+            id: state.current.id,
+            model,
+            provider: state.selectedProvider || undefined,
+        });
+        conversation.model = model;
+        if (state.selectedProvider) {
+            conversation.provider = state.selectedProvider;
+        }
+        render();
+    } catch (err) {
+        // The chat is busy or already gone - it keeps its own model
     }
 }
 

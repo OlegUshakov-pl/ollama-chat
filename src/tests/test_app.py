@@ -68,6 +68,7 @@ class TestApp(unittest.TestCase):
                     'runTask',
                     'saveProvider',
                     'sendEmail',
+                    'setConversationModel',
                     'setConversationTitle',
                     'setEmailSettings',
                     'setModel',
@@ -134,6 +135,7 @@ class TestApp(unittest.TestCase):
                     'runTask',
                     'saveProvider',
                     'sendEmail',
+                    'setConversationModel',
                     'setConversationTitle',
                     'setEmailSettings',
                     'setModel',
@@ -2685,6 +2687,107 @@ class TestAPI(unittest.TestCase):
             # Try to set title for busy conversation 'conv1'
             request = {'id': 'conv1', 'title': 'New Title'}
             status, headers, content_bytes = app.request('POST', '/setConversationTitle', wsgi_input=json.dumps(request).encode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            self.assertListEqual(headers, [('Content-Type', 'application/json')])
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertDictEqual(response, {'error': 'ConversationBusy'})
+
+            # Verify the app config
+            with app.config() as config:
+                self.assertDictEqual(config, original_config)
+
+            # Verify the config file
+            with open(config_path, 'r', encoding='utf-8') as config_fh:
+                self.assertEqual(json.load(config_fh), original_config)
+
+
+    def test_set_conversation_model_success(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'model': 'settings-model', 'provider': 'ollama',
+                'conversations': [{'id': 'conv1', 'model': 'old-model', 'title': 'Conversation 1', 'exchanges': []}]
+            }))
+        ]
+        with create_test_files(test_files) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            # Switch conversation 'conv1' to a new model and provider
+            request = {'id': 'conv1', 'model': 'new-model', 'provider': 'openai'}
+            status, headers, content_bytes = app.request('POST', '/setConversationModel', wsgi_input=json.dumps(request).encode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertListEqual(headers, [('Content-Type', 'application/json')])
+            self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {'model': 'new-model'})
+
+            # Verify the app config
+            with app.config() as config:
+                self.assertEqual(config['conversations'][0]['model'], 'new-model')
+                self.assertEqual(config['conversations'][0]['provider'], 'openai')
+
+            # Verify the config file
+            with open(config_path, 'r', encoding='utf-8') as config_fh:
+                saved = json.load(config_fh)
+            self.assertEqual(saved['conversations'][0]['model'], 'new-model')
+            self.assertEqual(saved['conversations'][0]['provider'], 'openai')
+
+
+    def test_set_conversation_model_keeps_provider(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [{'id': 'conv1', 'model': 'old-model', 'provider': 'ollama', 'title': 'Conversation 1', 'exchanges': []}]
+            }))
+        ]
+        with create_test_files(test_files) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            # The provider is optional - the conversation keeps its own when omitted
+            request = {'id': 'conv1', 'model': 'new-model'}
+            status, headers, content_bytes = app.request('POST', '/setConversationModel', wsgi_input=json.dumps(request).encode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {'model': 'new-model'})
+
+            # Verify the app config
+            with app.config() as config:
+                self.assertEqual(config['conversations'][0]['model'], 'new-model')
+                self.assertEqual(config['conversations'][0]['provider'], 'ollama')
+
+
+    def test_set_conversation_model_unknown_id(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({'conversations': []}))
+        ]
+        with create_test_files(test_files) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            # Switching an unknown conversation fails
+            request = {'id': 'missing', 'model': 'new-model'}
+            status, headers, content_bytes = app.request('POST', '/setConversationModel', wsgi_input=json.dumps(request).encode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            self.assertListEqual(headers, [('Content-Type', 'application/json')])
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertDictEqual(response, {'error': 'UnknownConversationID'})
+
+
+    def test_set_conversation_model_busy(self):
+        original_config = {
+            'conversations': [{'id': 'conv1', 'model': 'old-model', 'title': 'Conversation 1', 'exchanges': []}]
+        }
+        test_files = [
+            ('ollama-chat.json', json.dumps(original_config))
+        ]
+        with create_test_files(test_files) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            # Simulate a busy conversation by adding it to chats
+            mock_chat = unittest.mock.Mock()
+            app.chats['conv1'] = mock_chat
+
+            # Try to switch a busy conversation
+            request = {'id': 'conv1', 'model': 'new-model'}
+            status, headers, content_bytes = app.request('POST', '/setConversationModel', wsgi_input=json.dumps(request).encode('utf-8'))
             self.assertEqual(status, '400 Bad Request')
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))

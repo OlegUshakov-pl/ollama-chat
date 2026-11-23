@@ -990,6 +990,30 @@ action sendEmail
         UnknownConversationID
 
 
+# Switch the model of an existing conversation, without sending a message
+action setConversationModel
+    urls
+        POST
+
+    input
+        # The conversation identifier
+        string id
+
+        # The new model ID
+        string model
+
+        # The AI provider ID (the conversation's provider is kept when omitted)
+        optional string provider
+
+    output
+        # The conversation's model ID
+        string model
+
+    errors
+        ConversationBusy
+        UnknownConversationID
+
+
 # Set a conversation's title
 action setConversationTitle
     urls

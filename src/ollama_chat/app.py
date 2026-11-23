@@ -100,6 +100,7 @@ class OllamaChat(chisel.Application):
         self.add_request(run_task)
         self.add_request(save_provider)
         self.add_request(send_email_request)
+        self.add_request(set_conversation_model)
         self.add_request(set_conversation_title)
         self.add_request(set_email_settings)
         self.add_request(set_model)
@@ -792,6 +793,27 @@ def send_email_request(ctx, req):
             if email_draft and email_draft.get('to') == to:
                 email_draft['sent'] = True
     return {'sent': True}
+
+
+# Switch the model of an existing conversation, without sending a message. Used when the model
+# chosen on the Settings page should apply to the chat that is currently open.
+@chisel.action(name='setConversationModel', types=OLLAMA_CHAT_TYPES)
+def set_conversation_model(ctx, req):
+    with ctx.app.config(save=True) as config:
+        id_ = req['id']
+        conversation = config_conversation(config, id_)
+        if conversation is None:
+            raise chisel.ActionError('UnknownConversationID')
+
+        # Busy?
+        if id_ in ctx.app.chats:
+            raise chisel.ActionError('ConversationBusy')
+
+        # Set the conversation's model and, when given, its provider
+        conversation['model'] = req['model']
+        if req.get('provider'):
+            conversation['provider'] = _validated_provider(config, req['provider'])
+        return {'model': conversation['model']}
 
 
 @chisel.action(name='setConversationTitle', types=OLLAMA_CHAT_TYPES)
