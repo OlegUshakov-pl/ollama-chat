@@ -238,6 +238,7 @@ testOllamaChatConversationResetDiv = { \
 function testOllamaChatConversationPage1ExchangeCalls():
     return [ \
         ['systemFetch', ['getConversation?id=C1']], \
+        ['systemFetch', ['getConversations']], \
         ['elementModelRender', [testOllamaChatConversationFloatingConv()]], \
         ['documentSetFocus', ['ollama-chat-prompt']], \
         ['documentSetTitle', ['Chat']], \
@@ -305,6 +306,7 @@ async function testOllamaChatConversationPageWithExchanges():
     ollamaChatConversationPage(args)
     unittestDeepEqual(unittestMockEnd(), [ \
         ['systemFetch', ['getConversation?id=C1']], \
+        ['systemFetch', ['getConversations']], \
         ['elementModelRender', [testOllamaChatConversationFloatingConv()]], \
         ['documentSetFocus', ['ollama-chat-prompt']], \
         ['documentSetTitle', ['Chat']], \
@@ -345,6 +347,7 @@ async function testOllamaChatConversationPageTitleEdit():
     ollamaChatConversationPage(args)
     expected = [ \
         ['systemFetch', ['getConversation?id=C1']], \
+        ['systemFetch', ['getConversations']], \
         ['elementModelRender', [testOllamaChatConversationFloatingConv()]], \
         ['documentSetFocus', ['ollama-chat-prompt']], \
         ['documentSetTitle', ['Chat']], \
@@ -399,6 +402,99 @@ async function testOllamaChatConversationPageTitleEdit():
     systemGlobalSet('vAction', null)
 endfunction
 unittestRunTest('testOllamaChatConversationPageTitleEdit')
+
+
+#
+# ollamaChatConversationSyncModel - settings model applies to the open chat
+#
+
+
+async function testOllamaChatConversationSyncModelSwitch():
+    unittestMockAll({'systemFetch': { \
+        'getConversations': jsonStringify({'model': 'm:2'}), \
+        'setConversationModel': jsonStringify({'model': 'm:2'}) \
+    }})
+    model = ollamaChatConversationSyncModel('C1', 'm:1', false)
+    unittestDeepEqual(unittestMockEnd(), [ \
+        ['systemFetch', ['getConversations']], \
+        ['systemFetch', [ \
+            { \
+                'url': 'setConversationModel', \
+                'body': '{"id":"C1","model":"m:2"}' \
+            } \
+        ]] \
+    ])
+    unittestEqual(model, 'm:2')
+endfunction
+unittestRunTest('testOllamaChatConversationSyncModelSwitch')
+
+
+async function testOllamaChatConversationSyncModelSame():
+    # The settings model matches - no switch
+    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({'model': 'm:1'})}})
+    model = ollamaChatConversationSyncModel('C1', 'm:1', false)
+    unittestDeepEqual(unittestMockEnd(), [['systemFetch', ['getConversations']]])
+    unittestEqual(model, 'm:1')
+endfunction
+unittestRunTest('testOllamaChatConversationSyncModelSame')
+
+
+async function testOllamaChatConversationSyncModelGenerating():
+    # A busy conversation keeps its own model - not even a settings lookup
+    unittestMockAll({})
+    model = ollamaChatConversationSyncModel('C1', 'm:1', true)
+    unittestDeepEqual(unittestMockEnd(), [])
+    unittestEqual(model, 'm:1')
+endfunction
+unittestRunTest('testOllamaChatConversationSyncModelGenerating')
+
+
+async function testOllamaChatConversationSyncModelFailure():
+    # A failed switch (busy / unknown ID) keeps the conversation's model
+    unittestMockAll({'systemFetch': {'getConversations': jsonStringify({'model': 'm:2'})}})
+    model = ollamaChatConversationSyncModel('C1', 'm:1', false)
+    unittestDeepEqual(unittestMockEnd(), [ \
+        ['systemFetch', ['getConversations']], \
+        ['systemFetch', [ \
+            { \
+                'url': 'setConversationModel', \
+                'body': '{"id":"C1","model":"m:2"}' \
+            } \
+        ]] \
+    ])
+    unittestEqual(model, 'm:1')
+endfunction
+unittestRunTest('testOllamaChatConversationSyncModelFailure')
+
+
+async function testOllamaChatConversationPageSyncModel():
+    # The conversation page displays and stores the settings model after the switch
+    systemGlobalSet('vId', 'C1')
+    args = argsParse(ollamaChatArguments)
+    conv = {'conversation': {'id': 'C1', 'title': 'Chat', 'model': 'm:1', 'generating': false, 'exchanges': []}}
+    unittestMockAll({'systemFetch': { \
+        'getConversation?id=C1': jsonStringify(conv), \
+        'getConversations': jsonStringify({'model': 'm:2'}), \
+        'setConversationModel': jsonStringify({'model': 'm:2'}) \
+    }})
+    ollamaChatConversationPage(args)
+    unittestDeepEqual(unittestMockEnd(), [ \
+        ['systemFetch', ['getConversation?id=C1']], \
+        ['systemFetch', ['getConversations']], \
+        ['systemFetch', [ \
+            { \
+                'url': 'setConversationModel', \
+                'body': '{"id":"C1","model":"m:2"}' \
+            } \
+        ]], \
+        ['elementModelRender', [testOllamaChatConversationFloatingConv()]], \
+        ['documentSetFocus', ['ollama-chat-prompt']], \
+        ['documentSetTitle', ['Chat']], \
+        ['markdownPrint', ['# Chat','','**Model:** m:2']] \
+    ])
+    systemGlobalSet('vId', null)
+endfunction
+unittestRunTest('testOllamaChatConversationPageSyncModel')
 
 
 #

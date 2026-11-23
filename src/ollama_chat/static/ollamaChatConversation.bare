@@ -7,6 +7,31 @@ include <forms.bare>
 include 'ollamaChatUtil.bare'
 
 
+# Switch an open conversation to the model chosen on the Models page (or in settings), without
+# sending a message. Returns the model the conversation uses - the original one when the
+# conversation is generating or the switch failed.
+function ollamaChatConversationSyncModel(id, model, generating):
+    if id == null || generating:
+        return model
+    endif
+
+    # Get the settings model
+    conversationsText = systemFetch('getConversations')
+    conversationsResponse = if(conversationsText != null, jsonParse(conversationsText))
+    settingsModel = null
+    if conversationsResponse != null:
+        settingsModel = objectGet(conversationsResponse, 'model')
+    endif
+    if !settingsModel || settingsModel == model:
+        return model
+    endif
+
+    # Switch the conversation - replyConversation uses the conversation's own model
+    response = systemFetch({'url': 'setConversationModel', 'body': jsonStringify({'id': id, 'model': settingsModel})})
+    return if(response != null, settingsModel, model)
+endfunction
+
+
 # The Ollama Chat conversation page
 async function ollamaChatConversationPage(args):
     id = objectGet(args, 'id')
@@ -23,6 +48,10 @@ async function ollamaChatConversationPage(args):
         title = objectGet(conversation, 'title')
         model = objectGet(conversation, 'model')
         generating = objectGet(conversation, 'generating')
+
+        # Apply the model chosen in settings to this conversation
+        model = ollamaChatConversationSyncModel(id, model, generating)
+        objectSet(conversation, 'model', model)
     else:
         conversation = null
         title = ollamaChatTitle
