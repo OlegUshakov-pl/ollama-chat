@@ -496,6 +496,10 @@ class TestAPI(unittest.TestCase):
                     response['email'], \
                     {'imapHost': '', 'imapPort': 993, 'smtpHost': '', 'smtpPort': 465, 'user': '', 'hasPassword': False}
                 )
+                self.assertDictEqual( \
+                    response['memory'], \
+                    {'enabled': False, 'model': '', 'every': 3, 'minChars': 40, 'maxPending': 30}
+                )
 
 
     def test_get_profile(self):

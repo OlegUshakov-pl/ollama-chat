@@ -16,6 +16,11 @@ def _get_ollama_url(path, base_url=None):
     return f'{ollama_host}{path}'
 
 
+# Public alias for modules that call the Ollama API directly (e.g. memory extraction)
+def ollama_url(path, base_url=None):
+    return _get_ollama_url(path, base_url)
+
+
 # Extract Ollama's error message from an error response body, for display in the UI
 def _error_detail(response):
     try:

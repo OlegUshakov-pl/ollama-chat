@@ -24,6 +24,7 @@
 - **Reliable rename** — `Rename` in chat menu now updates both sidebar and open header instantly and awaits `POST /setConversationTitle` before navigation (`src/ollama_chat/static/app.js:885`, `src/ollama_chat/static/ollamaChatConversation.bare:312`).
 - **One-click Windows launch — `start.bat` / `install.bat`** — `install.bat` clones to clean folder + creates `.venv`, `start.bat` creates `.venv` if missing and forwards all args to `ollama-chat` (e.g. `start.bat -p 8080`).
 - **Workspace & long-term memory** — a directory on disk (`~/ollama-chat-workspace` by default) holding `USER.md` (about the user) and `MEMORY.md` (durable notes). The memory is injected into the system prompt for every model turn (`src/ollama_chat/memory.py`), managed from the chat with `/memory`, `/remember`, `/forget`. Set on the **Settings** page (`#/settings`) or via the `OLLAMA_CHAT_WORKSPACE` env var.
+- **Automatic memory proposals** — a local model suggests durable facts after a few exchanges; nothing is written until you confirm it on the **Memory** page. Only text you typed is analyzed (never attachments, web pages or model replies), and extraction runs only on local Ollama — memory is never sent to a cloud provider (`src/ollama_chat/memory.py`). Disabled by default.
 - **Settings and Tasks pages** — the home page is chat-only now: workspace and Gmail (IMAP/SMTP) settings moved to **Settings** (`#/settings`), the task manager moved to **Tasks** (`#/tasks`). The sidebar shows the workspace name and `Settings` / `Tasks` links. The server binds to `127.0.0.1` only.
 - **Gmail / email settings in the app** — IMAP/SMTP host+port, login and an app password are edited on the Settings page and written to `<workspace>/.env` (same format as `.env.example`). The password is write-only: it is never stored in `ollama-chat.json`, never committed to git and never sent back to the browser (only a `hasPassword` flag is returned). **Test connection** logs in to both servers without sending anything.
 - **Profile page (`#/profile`)** — a form (name, profession, country, city, time zone, languages, interests, equipment, reply style, …) that fills `memory/USER.md`; the form can be switched to a raw **Text** mode to edit `USER.md` as markdown. `USER.md` is added to the system prompt of every message (character limit: config key `profileLimit`, default `1500`), and the current date and time (time zone from `USER.md`'s `Timezone` line, or local) are injected with it. API: `GET /getProfile`, `POST /setProfile`.
@@ -95,6 +96,7 @@ ollama-chat -t askAristotle -v question "Why is the sky blue?"
 - **Rename / Delete / Download .md / Regenerate** per chat
 - Prompt commands `/file`, `/dir`, `/image`, `/url`, `/memory`, `/remember`, `/forget`, `/do`, `/?`, `/tasks`, `/task`
 - **Workspace memory** (`USER.md` + `MEMORY.md`) injected into every model turn
+- **Auto memory** — local model proposes facts, you confirm them on the `#/memory` page; off by default
 - **Settings page** (`#/settings`) — workspace folder and Gmail IMAP/SMTP settings with a connection test; the app password lives in `<workspace>/.env` only
 - **Scheduled tasks** (cron) — daily/weekly reports run by the in-app scheduler or Windows Task Scheduler, saved to workspace memory; managed on the Tasks page (`#/tasks`)
 - Conversation templates with `{{var}}` substitution
@@ -170,6 +172,7 @@ The workspace is a directory where the assistant keeps long-term memory:
 <workspace>/memory/USER.md      # background information about the user
 <workspace>/memory/MEMORY.md    # notes remembered across conversations
 <workspace>/memory/daily/YYYY-MM-DD.md   # scratchpad for dated notes
+<workspace>/memory/pending.json # unconfirmed auto-memory proposals (not injected into the prompt)
 ```
 
 **Choosing the workspace** — priority order:
@@ -188,6 +191,53 @@ Usage examples:
 /forget Nova
 /forget -y Nova
 ```
+
+### Auto memory
+
+With auto memory enabled, the assistant **proposes** durable facts after a reply and you decide
+whether to keep them. Nothing is written to `USER.md` or `MEMORY.md` until a proposal is accepted,
+and every accepted change leaves a `.bak` backup of the file. The feature is off by default.
+
+**Enabling it** — the **Auto memory** block on the Settings page (`#/settings`), or these keys in
+`ollama-chat.json`:
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `autoMemory` | bool | `false` | propose facts after replies |
+| `memoryModel` | string | `""` | local Ollama model used for extraction; empty = the chat's model when it is a local Ollama model |
+| `memoryEvery` | int | `3` | run extraction every N new exchanges |
+| `memoryMinChars` | int | `40` | skip extraction when the newly typed text is shorter than this |
+| `memoryMaxPending` | int | `30` | maximum number of unconfirmed proposals |
+
+Extraction runs in the background (one at a time) and never delays the reply. It accepts only the
+text **you typed** into the composer — model replies, tool/web results, e-mail content, attachment
+text and the output of `/file`, `/dir`, `/url` and other commands are excluded. That is what keeps
+a malicious web page or document from writing instructions into the memory that is injected into
+every future chat.
+
+**Local models only** — extraction always calls local Ollama (`/api/chat`, `stream=false`,
+`temperature=0`, JSON schema output, 120 s timeout). If the active provider is a cloud provider
+(AI Providers) and `memoryModel` is not set explicitly, no extraction is performed: memory is never
+sent to a cloud provider. Failed extractions never break the chat — the error is logged to
+`<workspace>/logs/YYYY-MM-DD.log`.
+
+**Proposals** — stored in `<workspace>/memory/pending.json` (a `.json` file so it is never injected
+into the system prompt or listed by `/memory`). Each proposal is an `add`, `update` or `delete` for
+`MEMORY.md` or `USER.md`; `update`/`delete` remember the exact line they will change. The Memory
+page (`#/memory`) shows them as cards (was → became for updates) with **Accept**, **Edit**,
+**Reject**, **Accept all** and **Reject all**, plus a **Find facts in this chat** button for a manual
+run. A new-facts notice appears under the chat reply without blocking the input.
+
+**Safety** — at most 5 facts per run and `memoryMaxPending` in the queue; one short line per fact
+(≤ 200 characters, no newlines or leading markdown markup), deduplicated against existing memory,
+and passwords, API keys, tokens, card/ID numbers and other long random strings are filtered out.
+User facts must be `Key: value` with a key from the Profile page's list. Memory limits
+(`memoryLimit`, `profileLimit`) keep working as before; accepting a profile fact that would exceed
+`profileLimit` is rejected with `ProfileTooLong`.
+
+API (also declared in `src/ollama_chat/static/ollamaChat.smd`): `GET /getMemoryProposals`,
+`POST /resolveMemoryProposal`, `POST /resolveAllMemoryProposals`, `POST /extractMemory`,
+`POST /setMemorySettings`. `GET /getSettings` includes the current memory settings.
 
 ### Profile page
 The Profile page (`#/profile`, link `Profile` in the sidebar) is a convenient editor for
@@ -269,6 +319,10 @@ The app password is write-only by design:
 
 **Test connection** — logs in to the configured IMAP and SMTP servers (SMTP login only, no e-mail
 is sent) and reports success or a per-protocol error.
+
+**Auto memory** — the toggle, extraction model picker (from the local Ollama model list) and the
+`memoryEvery` / `memoryMinChars` / `memoryMaxPending` numbers. With a cloud provider selected and an
+empty `memoryModel`, extraction stays off and the page explains why (see **Auto memory** above).
 
 ### Scheduled tasks
 Tasks run a prompt on a schedule (like cron) without a conversation: they read the workspace memory,
@@ -395,7 +449,7 @@ nano $HOME/.local/share/applications/ollama-chat.desktop
 
 [Ollama Chat File Format](https://craigahobbs.github.io/ollama-chat/api.html#var.vName='OllamaChatConfig')
 [Ollama Chat API](https://craigahobbs.github.io/ollama-chat/api.html)
-Schema: `src/ollama_chat/static/ollamaChat.smd` — fork adds `think`/`files`/`search` to `StartConversation`/`ReplyConversation`/`StartTemplate`, `tools` to `ConversationExchange`, `tasks`/`TaskInfo` to `getConversations`, `workspace`/`memoryLimit`/`tasksCatchUp` to `OllamaChatConfig` plus the `setWorkspace` endpoint, and the `exportPdf` endpoint. The Settings/Tasks pages add the `getSettings`, `setEmailSettings`, `testEmailConnection`, `getTasks`, `setTask`, `deleteTask`, `runTask` and `getTaskLog` endpoints with the `TaskDetails`/`TaskInput`/`TaskLog`/`EmailSettings`/`SettingsInfo` types.
+Schema: `src/ollama_chat/static/ollamaChat.smd` — fork adds `think`/`files`/`search` to `StartConversation`/`ReplyConversation`/`StartTemplate`, `tools` to `ConversationExchange`, `tasks`/`TaskInfo` to `getConversations`, `workspace`/`memoryLimit`/`tasksCatchUp` to `OllamaChatConfig` plus the `setWorkspace` endpoint, and the `exportPdf` endpoint. The Settings/Tasks pages add the `getSettings`, `setEmailSettings`, `testEmailConnection`, `getTasks`, `setTask`, `deleteTask`, `runTask` and `getTaskLog` endpoints with the `TaskDetails`/`TaskInput`/`TaskLog`/`EmailSettings`/`SettingsInfo` types. Auto memory adds `autoMemory`/`memoryModel`/`memoryEvery`/`memoryMinChars`/`memoryMaxPending` to `OllamaChatConfig`, the `MemoryProposal`/`MemorySettings` types and the `getMemoryProposals`, `resolveMemoryProposal`, `resolveAllMemoryProposals`, `extractMemory` and `setMemorySettings` endpoints.
 
 ## Development
 

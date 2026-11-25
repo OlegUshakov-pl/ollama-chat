@@ -31,8 +31,8 @@ from .email_tools import (
 )
 from .memory import (
     MEMORY_BACKUP_SUFFIX, MEMORY_FILENAME, PROFILE_LIMIT_DEFAULT, USER_MEMORY_FILENAME,
-    daily_file_path, ensure_workspace, memory_file_path, read_memory_file, workspace_dir,
-    write_memory_file
+    daily_file_path, ensure_workspace, memory_file_path, memory_settings, read_memory_file,
+    workspace_dir, write_memory_file
 )
 from .ollama import ollama_delete, ollama_list, ollama_pull
 from .pdf import conversation_markdown, write_pdf_file
@@ -308,7 +308,8 @@ def get_settings(ctx, unused_req):
         workspace = str(workspace_dir(config))
         response = {
             'workspace': workspace,
-            'email': get_email_settings(workspace)
+            'email': get_email_settings(workspace),
+            'memory': memory_settings(config)
         }
         if 'model' in config:
             response['model'] = config['model']

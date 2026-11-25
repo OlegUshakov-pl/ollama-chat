@@ -156,6 +156,9 @@ struct SettingsInfo
     # The current provider ID
     optional string provider
 
+    # The auto-memory settings
+    MemorySettings memory
+
 
 # The user profile - the USER.md content and its character limit
 struct ProfileInfo
@@ -165,6 +168,55 @@ struct ProfileInfo
 
     # The max USER.md content length - longer content is rejected by setProfile
     int limit
+
+
+# A memory fact proposed by the auto memory, awaiting the user's confirmation. Nothing is
+# written to USER.md or MEMORY.md until the proposal is accepted.
+struct MemoryProposal
+
+    # The proposal identifier
+    string id
+
+    # The conversation the fact was extracted from
+    optional string conversationId
+
+    # When the proposal was created (ISO 8601)
+    optional string createdAt
+
+    # The action - "add", "update" or "delete"
+    string action
+
+    # The target memory file - "memory" (MEMORY.md) or "user" (USER.md)
+    string target
+
+    # The proposed fact text, in the form "Key: value" for target "user"
+    string text
+
+    # The existing memory line the proposal replaces or deletes, as the model wrote it
+    optional string replaces
+
+    # The actual line found in the target file for an update or a delete - shown as "was"
+    optional string matched
+
+
+# The auto-memory settings
+struct MemorySettings
+
+    # If true, the model proposes facts for the long-term memory after replies
+    bool enabled
+
+    # The local Ollama model used to extract the facts. Empty means the chat's model when
+    # it is a local Ollama model - a cloud provider never receives the memory.
+    string model
+
+    # Run the extraction every N new exchanges (default is 3)
+    int(>= 1) every
+
+    # Skip the extraction when the new typed messages are shorter than this (default is 40)
+    int(>= 0) minChars
+
+    # The maximum number of pending proposals (default is 30)
+    int(>= 1) maxPending
 
 
 # The user-model conversation info with generating status
@@ -458,6 +510,24 @@ struct OllamaChatConfig
     # The user profile (memory/USER.md) character limit (default is 1500)
     optional int profileLimit
 
+    # If true, the model proposes durable facts for the long-term memory after replies and
+    # the facts are written only once the user confirms them (default is false)
+    optional bool autoMemory
+
+    # The local Ollama model used to extract the memory facts. Empty means the chat's model
+    # when it is a local Ollama model.
+    optional string memoryModel
+
+    # Run the memory fact extraction every N new exchanges (default is 3)
+    optional int memoryEvery
+
+    # Skip the memory fact extraction when the new typed messages are shorter than this many
+    # characters (default is 40)
+    optional int memoryMinChars
+
+    # The maximum number of pending memory proposals (default is 30)
+    optional int memoryMaxPending
+
     # If true, run tasks missed within the last 24 hours at application start (default is false)
     optional bool tasksCatchUp
 
@@ -635,6 +705,106 @@ action setProfile
     errors
         ProfileTooLong
         BadProfile
+
+
+# Get the pending memory fact proposals proposed by the auto memory. Nothing is written to
+# USER.md or MEMORY.md until a proposal is accepted.
+action getMemoryProposals
+    urls
+        GET
+
+    output
+        # True when the auto memory is enabled
+        bool enabled
+
+        # The pending proposals
+        MemoryProposal[] proposals
+
+        # The number of pending proposals
+        int pending
+
+
+# Accept or reject one memory fact proposal. An accepted proposal with an "update" or
+# "delete" action changes exactly the line shown as "matched".
+action resolveMemoryProposal
+    urls
+        POST
+
+    input
+        # The proposal identifier
+        string id
+
+        # True to accept the proposal, false to reject it
+        bool accept
+
+        # The fact text, to accept the proposal with an edit
+        optional string text
+
+    output
+        # The number of proposals still pending
+        int pending
+
+    errors
+        BadText
+        NotFound
+        ProfileTooLong
+
+
+# Accept or reject all pending memory fact proposals. Accepting applies the proposals one by
+# one and stops at the first error.
+action resolveAllMemoryProposals
+    urls
+        POST
+
+    input
+        # True to accept the proposals, false to reject them
+        bool accept
+
+    output
+        # The number of resolved proposals
+        int resolved
+
+        # The number of proposals still pending
+        int pending
+
+    errors
+        BadText
+        NotFound
+        ProfileTooLong
+
+
+# Start a memory fact extraction for a conversation (the Memory page's "find facts" button).
+# Runs in the background on local Ollama only; it ignores the exchange count and the minimum
+# text length, but never reads attachments, tool results or command output.
+action extractMemory
+    urls
+        POST
+
+    input
+        # The conversation identifier
+        string id
+
+    output
+        # True when an extraction was started in the background
+        bool started
+
+    errors
+        UnknownConversationID
+
+
+# Save the auto-memory settings
+action setMemorySettings
+    urls
+        POST
+
+    input (MemorySettings)
+
+    output
+        # The saved auto-memory settings
+        MemorySettings memory
+
+    errors
+        BadMemorySettings
 
 
 # Get the scheduled tasks' full info (the tasks page's list)

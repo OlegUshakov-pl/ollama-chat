@@ -6,9 +6,14 @@ import os
 import unittest
 import unittest.mock
 
+import urllib3
+
 from ollama_chat.memory import (
-    daily_file_path, ensure_workspace, find_memory_lines, forget, memory_context, memory_file_path,
-    read_memory_file, remember, time_context, user_timezone, workspace_dir, write_memory_file
+    MAX_MEMORY_FACTS, USER_FACT_KEYS, daily_file_path, ensure_workspace, filter_memory_facts,
+    find_memory_lines, forget, log_memory_error, memory_context, memory_extraction_model,
+    memory_extraction_message, memory_file_path, memory_settings, normalize_memory_text,
+    pending_path, propose_memory, read_memory_file, read_pending, remember, sanitize_memory_fact,
+    time_context, update_pending, user_timezone, workspace_dir, write_memory_file
 )
 
 from .util import create_test_files
@@ -232,3 +237,207 @@ class TestMemory(unittest.TestCase):
         with create_test_files(test_files) as temp_dir:
             context = time_context(temp_dir)
             self.assertRegex(context, r'^Current date and time: [A-Z][a-z]{2}, \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(UTC[+-]\d{4}\)$')
+
+
+class TestAutoMemory(unittest.TestCase):
+
+    def test_memory_settings_defaults(self):
+        self.assertDictEqual(memory_settings(None), {
+            'enabled': False, 'model': '', 'every': 3, 'minChars': 40, 'maxPending': 30
+        })
+        self.assertDictEqual(memory_settings({
+            'autoMemory': True, 'memoryModel': 'gemma4:e4b', 'memoryEvery': 0,
+            'memoryMinChars': -5, 'memoryMaxPending': 0
+        }), {
+            'enabled': True, 'model': 'gemma4:e4b', 'every': 1, 'minChars': 0, 'maxPending': 1
+        })
+
+
+    def test_memory_extraction_model(self):
+        # No memoryModel - only a local Ollama conversation's model may be used
+        self.assertEqual(memory_extraction_model({}, None, 'llm'), 'llm')
+        self.assertEqual(memory_extraction_model({}, 'ollama', 'llm'), 'llm')
+
+        # A cloud provider without memoryModel must never receive the memory
+        cloud_config = {'providers': [{'id': 'openai', 'name': 'OpenAI', 'type': 'openai'}]}
+        self.assertIsNone(memory_extraction_model(cloud_config, 'openai', 'gpt-4o'))
+        self.assertIsNone(memory_extraction_model(cloud_config, 'openai', None))
+
+        # An explicitly configured memoryModel is always a local Ollama model
+        self.assertEqual( \
+            memory_extraction_model({'memoryModel': 'gemma4:e4b'}, 'openai', 'gpt-4o'), \
+            'gemma4:e4b' \
+        )
+
+
+    def test_pending_store(self):
+        with create_test_files([]) as temp_dir:
+            self.assertEqual(read_pending(temp_dir), {'cursors': {}, 'proposals': []})
+            self.assertEqual(pending_path(temp_dir), os.path.join(temp_dir, 'memory', 'pending.json'))
+
+            # The update runs under the lock and writes atomically
+            self.assertEqual(update_pending(temp_dir, lambda pending: pending['cursors'].update({'conv1': 2})), None)
+            self.assertEqual(read_pending(temp_dir)['cursors'], {'conv1': 2})
+
+            # No .md proposal file reaches the system prompt
+            self.assertFalse(os.path.exists(os.path.join(temp_dir, 'memory', 'pending.md')))
+
+
+    def test_normalize_memory_text(self):
+        self.assertEqual(normalize_memory_text('- 2026-11-25: Likes  TEA!'), 'likes tea')
+        self.assertEqual(normalize_memory_text('City: Warsaw'), 'city warsaw')
+
+
+    def test_memory_extraction_message(self):
+        message = memory_extraction_message(['first', 'second'], 'memory line', '- City: Warsaw')
+        self.assertIn('1. first', message)
+        self.assertIn('2. second', message)
+        self.assertIn('memory line', message)
+        self.assertIn('City: Warsaw', message)
+
+        # The context blocks are trimmed to a reasonable size
+        message = memory_extraction_message(['hello'], 'm' * 10000, 'u' * 10000)
+        self.assertLessEqual(len(message), 6000 + 200)
+
+
+    def test_propose_memory(self):
+        response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+        response.status = 200
+        response.json.return_value = {'facts': [
+            {'action': 'add', 'target': 'memory', 'text': 'Работает над ollama-chat'}
+        ]}
+        with unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+            mock_pool_manager.return_value.request.return_value = response
+            facts = propose_memory(['Работает над ollama-chat'], '', '', 'gemma4:e4b', base_url='http://ollama:11434')
+
+        self.assertEqual(facts, [{'action': 'add', 'target': 'memory', 'text': 'Работает над ollama-chat'}])
+        args, kwargs = mock_pool_manager.return_value.request.call_args
+        self.assertEqual(args, ('POST', 'http://ollama:11434/api/chat'))
+        payload = kwargs['json']
+        self.assertFalse(payload['stream'])
+        self.assertFalse(payload['think'])
+        self.assertEqual(payload['options'], {'temperature': 0})
+        self.assertEqual(payload['model'], 'gemma4:e4b')
+        self.assertEqual(payload['format']['required'], ['facts'])
+        self.assertEqual(len(payload['messages']), 2)
+        self.assertEqual(payload['messages'][0]['role'], 'system')
+        self.assertIn('1. Работает над ollama-chat', payload['messages'][1]['content'])
+        response.close.assert_called_once_with()
+
+
+    def test_propose_memory_bad_json(self):
+        response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+        response.status = 200
+        response.json.side_effect = ValueError('not json')
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+            mock_pool_manager.return_value.request.return_value = response
+            self.assertEqual(propose_memory(['some durable fact text'], '', '', 'llm', workspace=temp_dir), [])
+
+            logs = os.listdir(os.path.join(temp_dir, 'logs'))
+            self.assertEqual(len(logs), 1)
+            with open(os.path.join(temp_dir, 'logs', logs[0]), 'r', encoding='utf-8') as log_fh:
+                self.assertIn('memory error:', log_fh.read())
+
+
+    def test_propose_memory_http_error(self):
+        response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+        response.status = 500
+        with unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+            mock_pool_manager.return_value.request.return_value = response
+            self.assertEqual(propose_memory(['some durable fact text'], '', '', 'llm'), [])
+        response.close.assert_called_once_with()
+
+
+    def test_propose_memory_no_messages_or_model(self):
+        with unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+            self.assertEqual(propose_memory([], '', '', 'llm'), [])
+            self.assertEqual(propose_memory(['hello'], '', '', ''), [])
+        mock_pool_manager.assert_not_called()
+
+
+    def test_filter_add_duplicate(self):
+        memory_text = '# Memory\n\n- 2026-11-25: likes coffee\n'
+        facts = [
+            {'action': 'add', 'target': 'memory', 'text': 'Likes coffee'},
+            {'action': 'add', 'target': 'memory', 'text': 'Likes tea'}
+        ]
+        self.assertEqual(filter_memory_facts(facts, memory_text, ''), [
+            {'action': 'add', 'target': 'memory', 'text': 'Likes tea'}
+        ])
+
+
+    def test_filter_update_delete(self):
+        memory_text = '# Memory\n\n- 2026-11-25: City: Warsaw\n- 2026-11-25: likes coffee\n'
+        user_text = '# About the user\n\n- City: Warsaw\n'
+        facts = [
+            {
+                'action': 'update', 'target': 'user', 'text': 'City: Rzeszów',
+                'replaces': 'City: Warsaw'
+            },
+            {
+                'action': 'delete', 'target': 'memory', 'text': 'likes coffee',
+                'replaces': '2026-11-25: likes coffee'
+            }
+        ]
+        filtered = filter_memory_facts(facts, memory_text, user_text)
+        self.assertEqual(filtered, [
+            {
+                'action': 'update', 'target': 'user', 'text': 'City: Rzeszów',
+                'replaces': 'City: Warsaw', 'matched': '- City: Warsaw'
+            },
+            {
+                'action': 'delete', 'target': 'memory', 'text': 'likes coffee',
+                'replaces': '2026-11-25: likes coffee', 'matched': '- 2026-11-25: likes coffee'
+            }
+        ])
+
+
+    def test_filter_unmatched_update_becomes_add(self):
+        memory_text = '- likes coffee\n'
+        facts = [
+            {'action': 'update', 'target': 'memory', 'text': 'likes tea', 'replaces': 'unknown line'},
+            {'action': 'delete', 'target': 'memory', 'text': 'unknown', 'replaces': 'unknown line'}
+        ]
+        self.assertEqual(filter_memory_facts(facts, memory_text, ''), [
+            {'action': 'add', 'target': 'memory', 'text': 'likes tea'}
+        ])
+
+
+    def test_filter_secrets_and_markup(self):
+        # Leading markup is stripped so a fact can't break the memory file's structure
+        self.assertEqual(sanitize_memory_fact('# - likes tea', 'memory'), 'likes tea')
+        self.assertEqual(sanitize_memory_fact('  > likes\ntea  ', 'memory'), 'likes tea')
+        self.assertEqual(len(sanitize_memory_fact('word ' * 60, 'memory')), 200)
+        self.assertIsNone(sanitize_memory_fact('my password is hunter2', 'memory'))
+        self.assertIsNone(sanitize_memory_fact('api_key: abc123', 'memory'))
+        self.assertIsNone(sanitize_memory_fact('token = abcdefghijklmnopqrstuvwxyz', 'memory'))
+        self.assertIsNone(sanitize_memory_fact('card 4111 1111 1111 1111', 'memory'))
+        self.assertIsNone(sanitize_memory_fact('key: abcdefghijklmnopqrstuvwxyz12345', 'memory'))
+        self.assertIsNone(sanitize_memory_fact('PESEL 12345678901', 'memory'))
+
+        # User facts require one of the allowed keys, normalized to its canonical spelling
+        self.assertEqual(sanitize_memory_fact('city: Rzeszów', 'user'), 'City: Rzeszów')
+        self.assertIn('Reply language', USER_FACT_KEYS)
+        self.assertIsNone(sanitize_memory_fact('Hometown: Rzeszów', 'user'))
+        self.assertIsNone(sanitize_memory_fact('just some text', 'user'))
+
+
+    def test_filter_invalid_facts(self):
+        facts = [
+            {'action': 'invent', 'target': 'memory', 'text': 'likes tea'},
+            {'action': 'add', 'target': 'tool', 'text': 'likes tea'},
+            'not a dict',
+            {'action': 'add', 'target': 'memory'}
+        ]
+        self.assertEqual(filter_memory_facts(facts, '', ''), [])
+
+
+    def test_filter_max_facts(self):
+        facts = [{'action': 'add', 'target': 'memory', 'text': f'fact number {index}'} for index in range(10)]
+        self.assertEqual(len(filter_memory_facts(facts, '', '')), MAX_MEMORY_FACTS)
+
+
+    def test_log_memory_error_bad_workspace(self):
+        # Even a bad workspace must not raise
+        log_memory_error(None, 'something failed')
