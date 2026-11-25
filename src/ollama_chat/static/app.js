@@ -167,6 +167,43 @@ const STRINGS = {
     toolsTaskCheckEmail: 'Read email',
     toolsTaskSendEmail: 'Send email',
     everyDayShort: 'Every day',
+    navMemory: 'Memory',
+    memoryHeading: 'Memory',
+    memoryEnabled: 'Auto memory: on',
+    memoryDisabled: 'Auto memory: off',
+    memoryModel: 'Extraction model:',
+    memoryChatModel: 'current chat model (local Ollama)',
+    memoryFind: 'Find facts in this chat',
+    memoryFinding: 'Looking for facts…',
+    memoryStarted: 'Looking for facts in the background',
+    memoryNotStarted: 'Open a chat first, then find facts in it.',
+    memoryAcceptAll: 'Accept all',
+    memoryRejectAll: 'Reject all',
+    memoryAccept: 'Accept',
+    memoryReject: 'Reject',
+    memoryEdit: 'Edit',
+    memorySave: 'Save',
+    memoryCancel: 'Cancel',
+    memoryAdd: 'Add',
+    memoryUpdate: 'Change',
+    memoryDelete: 'Delete',
+    memoryTargetMemory: 'MEMORY.md',
+    memoryTargetUser: 'USER.md',
+    memoryWas: 'was',
+    memoryEmpty: 'No pending facts. Enable auto memory in Settings → General → Auto memory, or use "Find facts in this chat".',
+    memoryNotice: 'New facts for memory:',
+    memoryNoticeOpen: 'open',
+    memorySettings: 'Auto memory',
+    memorySettingsHint: 'A local model proposes durable facts after replies. Nothing is written until you confirm it on the Memory page. Only text you typed is analyzed; memory is never sent to a cloud provider.',
+    memoryEnableLabel: 'Propose memory facts',
+    memoryModelLabel: 'Extraction model',
+    memoryModelDefault: 'Current chat model (local Ollama)',
+    memoryEveryLabel: 'Every N exchanges',
+    memoryMinCharsLabel: 'Minimum typed characters',
+    memoryMaxPendingLabel: 'Maximum pending facts',
+    memoryCloudHint: 'A cloud provider is selected. Set an extraction model to keep memory on local Ollama, otherwise auto memory stays off.',
+    memorySaved: 'Auto-memory settings saved',
+    memoryError: 'Failed to load memory proposals.',
 };
 
 /** Inline SVG icons (contour style, 20px, stroke 1.75, currentColor). */
@@ -202,6 +239,7 @@ const ICONS = {
     folder: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h5l2 2h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>',
     edit: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
     close: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+    memory: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5a3 3 0 0 0-5.7-1.3A3 3 0 0 0 3.5 8 3 3 0 0 0 4 14a3 3 0 0 0 3 4.8A3 3 0 0 0 12 20V5Z"/><path d="M12 5a3 3 0 0 1 5.7-1.3A3 3 0 0 1 20.5 8a3 3 0 0 1-.5 6 3 3 0 0 1-3 4.8A3 3 0 0 1 12 20"/></svg>',
 };
 
 /** The tool-call round limit options the composer's tool-rounds button cycles through. */
@@ -288,6 +326,12 @@ const state = {
     tasksPage: { loading: false, error: null, items: null, timer: null },
     taskForm: null,
     taskLog: null,
+    memoryPage: { loading: false, error: null, data: null, settings: null, busy: false, editing: null, notice: null },
+    memoryBadge: 0,
+    memoryLastSeen: 0,
+    memoryNotice: null,
+    memoryTimer: null,
+    lastChatId: null,
 };
 
 function loadThinkingEnabled() {
@@ -415,6 +459,9 @@ function parseRoute() {
     }
     if (hash === '#/profile') {
         return { name: 'profile' };
+    }
+    if (hash === '#/memory') {
+        return { name: 'memory' };
     }
     const match = hash.match(/^#\/c\/([A-Za-z0-9-]+)/);
     if (match) {
@@ -606,6 +653,14 @@ async function loadSettings() {
     } catch (err) {
         state.providers.loading = false;
         state.providers.error = err.message;
+    }
+    // The auto-memory model picker lists the locally installed Ollama models
+    if (!state.models) {
+        try {
+            await loadModels();
+        } catch (err) {
+            state.models = { current: null, list: [] };
+        }
     }
     render();
 }
@@ -1823,6 +1878,64 @@ function buildPageHtml(titleText, innerHtml) {
     return `<div class="page-scroll"><div class="page"><h1 class="page-title">${escapeHtml(titleText)}</h1>${innerHtml}</div></div>`;
 }
 
+/** The auto-memory settings panel on the Settings / General tab. */
+function buildMemorySettingsHtml() {
+    const memory = (state.settings.data && state.settings.data.memory) || {
+        enabled: false, model: '', every: 3, minChars: 40, maxPending: 30
+    };
+    const models = (state.models && state.models.list) || [];
+    const options = `<option value="">${escapeHtml(STRINGS.memoryModelDefault)}</option>` +
+        models.map((model) => `<option value="${escapeHtml(model.id)}"${model.id === memory.model ? ' selected' : ''}>${escapeHtml(model.id)}</option>`).join('');
+    const cloudProvider = state.selectedProvider && state.selectedProvider !== 'ollama';
+    const cloudHint = cloudProvider && !memory.model
+        ? `<p class="form-hint">${escapeHtml(STRINGS.memoryCloudHint)}</p>` : '';
+    return `<section class="panel">` +
+        `<h2>${escapeHtml(STRINGS.memorySettings)}</h2>` +
+        `<label class="checkbox-field"><input id="memory-enabled" type="checkbox"${memory.enabled ? ' checked' : ''}>` +
+        `<span>${escapeHtml(STRINGS.memoryEnableLabel)}</span></label>` +
+        `<div class="form-grid">` +
+        `<label class="form-field" for="memory-model"><span>${escapeHtml(STRINGS.memoryModelLabel)}</span>` +
+        `<select id="memory-model">${options}</select></label>` +
+        `<label class="form-field" for="memory-every"><span>${escapeHtml(STRINGS.memoryEveryLabel)}</span>` +
+        `<input id="memory-every" type="number" min="1" value="${Number(memory.every) || 3}"></label>` +
+        `<label class="form-field" for="memory-minchars"><span>${escapeHtml(STRINGS.memoryMinCharsLabel)}</span>` +
+        `<input id="memory-minchars" type="number" min="0" value="${Number(memory.minChars) || 0}"></label>` +
+        `<label class="form-field" for="memory-maxpending"><span>${escapeHtml(STRINGS.memoryMaxPendingLabel)}</span>` +
+        `<input id="memory-maxpending" type="number" min="1" value="${Number(memory.maxPending) || 30}"></label>` +
+        `</div>` +
+        `<p class="form-hint">${escapeHtml(STRINGS.memorySettingsHint)}</p>` + cloudHint +
+        `<div class="panel-actions">` +
+        `<button type="button" class="btn btn-primary" data-action="saveMemory"${state.settings.saving ? ' disabled' : ''}>` +
+        `${escapeHtml(STRINGS.save)}</button>` +
+        `</div></section>`;
+}
+
+/** Save the auto-memory settings from the Settings / General panel. */
+async function submitMemorySettings() {
+    const read = (id) => (document.getElementById(id) ? document.getElementById(id).value : '');
+    const checkbox = document.getElementById('memory-enabled');
+    const body = {
+        enabled: Boolean(checkbox && checkbox.checked),
+        model: read('memory-model') || '',
+        every: Number(read('memory-every')) || 3,
+        minChars: Number(read('memory-minchars')) || 0,
+        maxPending: Number(read('memory-maxpending')) || 30
+    };
+    state.settings.saving = true;
+    state.settings.error = null;
+    state.settings.notice = null;
+    render();
+    try {
+        const data = await apiPost('setMemorySettings', body);
+        state.settings.data = { ...state.settings.data, memory: data.memory };
+        state.settings.notice = STRINGS.memorySaved;
+    } catch (err) {
+        state.settings.error = err.message;
+    }
+    state.settings.saving = false;
+    render();
+}
+
 function buildSettingsHtml() {
     const form = state.settings;
     if (form.loading || !form.data) {
@@ -1887,7 +2000,7 @@ function buildSettingsHtml() {
         let banners = '';
         if (form.error) banners += `<div class="error-banner" role="alert">${escapeHtml(`${STRINGS.errorBannerPrefix}${form.error}`)}</div>`;
         if (form.notice) banners += `<div class="notice-banner" role="status">${escapeHtml(form.notice)}</div>`;
-        inner += banners + workspaceHtml + gmailHtml;
+        inner += banners + workspaceHtml + gmailHtml + buildMemorySettingsHtml();
     } else if (state.settingsTab === 'ai') {
         inner += buildAiTabHtml();
     } else if (state.settingsTab === 'profile') {
@@ -2259,7 +2372,183 @@ function buildMessagesHtml() {
     exchanges.forEach((exchange, index) => {
         html += renderExchange(exchange, index, index === exchanges.length - 1, cur.generating);
     });
+    if (state.memoryNotice > 0) {
+        html += `<div class="memory-notice" role="status">${escapeHtml(STRINGS.memoryNotice)} ${state.memoryNotice} ` +
+            `→ <a href="#/memory">${escapeHtml(STRINGS.memoryNoticeOpen)}</a></div>`;
+    }
     return html;
+}
+
+/* ---------- Memory page ---------- */
+
+/** Patch only the sidebar badge, so polling doesn't disturb the page. */
+function patchMemoryBadge() {
+    const badge = document.querySelector('[data-role="memory-badge"]');
+    if (!badge) {
+        return;
+    }
+    badge.textContent = String(state.memoryBadge);
+    badge.style.display = state.memoryBadge > 0 ? '' : 'none';
+}
+
+/** Refresh the pending count (after replies and every 15 seconds). */
+async function refreshMemoryCount() {
+    try {
+        const data = await apiGet('getMemoryProposals');
+        const count = data.pending || 0;
+        const previous = state.memoryLastSeen;
+        state.memoryBadge = count;
+        state.memoryLastSeen = count;
+        patchMemoryBadge();
+        if (state.route.name === 'memory' && state.memoryPage.data) {
+            state.memoryPage.data = data;
+            const list = document.querySelector('.memory-list');
+            if (list && !state.memoryPage.editing) {
+                list.outerHTML = buildMemoryListHtml(data.proposals || []);
+            }
+            return;
+        }
+        if (count > previous && state.route.name !== 'memory') {
+            state.memoryNotice = count;
+            patchMessages();
+        } else if (count === 0 && state.memoryNotice) {
+            state.memoryNotice = null;
+            patchMessages();
+        }
+    } catch (err) {
+        // A stale badge is better than a broken page
+    }
+}
+
+async function loadMemoryPage() {
+    state.memoryPage = { ...state.memoryPage, loading: true, error: null, notice: null, editing: null };
+    render();
+    try {
+        const [data, settings] = await Promise.all([apiGet('getMemoryProposals'), apiGet('getSettings')]);
+        state.memoryPage = {
+            ...state.memoryPage, loading: false, data, settings: settings.memory || null, busy: false
+        };
+        state.memoryBadge = data.pending || 0;
+        state.memoryLastSeen = state.memoryBadge;
+        state.memoryNotice = null;
+        patchMemoryBadge();
+    } catch (err) {
+        state.memoryPage = { ...state.memoryPage, loading: false, error: err.message };
+    }
+    render();
+}
+
+async function resolveMemoryProposalAction(id, accept, text) {
+    state.memoryPage.busy = true;
+    render();
+    try {
+        const body = { id, accept };
+        if (text !== undefined) {
+            body.text = text;
+        }
+        await apiPost('resolveMemoryProposal', body);
+        await loadMemoryPage();
+    } catch (err) {
+        state.memoryPage.busy = false;
+        state.memoryPage.error = err.message;
+        render();
+    }
+}
+
+async function resolveAllMemoryProposalsAction(accept) {
+    state.memoryPage.busy = true;
+    render();
+    try {
+        await apiPost('resolveAllMemoryProposals', { accept });
+        await loadMemoryPage();
+    } catch (err) {
+        state.memoryPage.busy = false;
+        state.memoryPage.error = err.message;
+        render();
+    }
+}
+
+/** Start a manual extraction in the last open chat (ignores the count/length thresholds). */
+async function extractMemoryNow() {
+    if (!state.lastChatId) {
+        state.memoryPage.notice = STRINGS.memoryNotStarted;
+        render();
+        return;
+    }
+    state.memoryPage.busy = true;
+    render();
+    try {
+        const data = await apiPost('extractMemory', { id: state.lastChatId });
+        state.memoryPage = {
+            ...state.memoryPage, busy: false,
+            notice: data.started ? STRINGS.memoryStarted : STRINGS.memoryNotStarted
+        };
+    } catch (err) {
+        state.memoryPage.busy = false;
+        state.memoryPage.error = err.message;
+    }
+    render();
+}
+
+function buildMemoryCard(proposal) {
+    const id = String(proposal.id || '');
+    const editing = state.memoryPage.editing === id;
+    const actionLabel = proposal.action === 'add' ? STRINGS.memoryAdd
+        : proposal.action === 'update' ? STRINGS.memoryUpdate : STRINGS.memoryDelete;
+    const targetLabel = proposal.target === 'user' ? STRINGS.memoryTargetUser : STRINGS.memoryTargetMemory;
+    const was = proposal.matched
+        ? `<p class="memory-was"><span>${escapeHtml(STRINGS.memoryWas)}:</span> <del>${escapeHtml(proposal.matched)}</del></p>`
+        : '';
+    const text = editing
+        ? `<input class="memory-edit-input" id="memory-edit-input" type="text" value="${escapeHtml(proposal.text)}">`
+        : `<pre class="memory-text">${escapeHtml(proposal.text)}</pre>`;
+    const actions = editing
+        ? `<button type="button" class="btn btn-primary" data-action="memory-edit-save" data-id="${escapeHtml(id)}">${escapeHtml(STRINGS.memorySave)}</button>` +
+          `<button type="button" class="btn" data-action="memory-edit-cancel">${escapeHtml(STRINGS.memoryCancel)}</button>`
+        : `<button type="button" class="btn btn-primary" data-action="memory-accept" data-id="${escapeHtml(id)}"${state.memoryPage.busy ? ' disabled' : ''}>${escapeHtml(STRINGS.memoryAccept)}</button>` +
+          `<button type="button" class="btn" data-action="memory-edit" data-id="${escapeHtml(id)}">${escapeHtml(STRINGS.memoryEdit)}</button>` +
+          `<button type="button" class="btn" data-action="memory-reject" data-id="${escapeHtml(id)}"${state.memoryPage.busy ? ' disabled' : ''}>${escapeHtml(STRINGS.memoryReject)}</button>`;
+    return `<article class="memory-card">` +
+        `<div class="memory-card-head"><span class="memory-action memory-${escapeHtml(proposal.action)}">${escapeHtml(actionLabel)}</span>` +
+        `<span class="memory-target">${escapeHtml(targetLabel)}</span></div>` +
+        was + text +
+        `<div class="memory-actions">${actions}</div>` +
+        `</article>`;
+}
+
+function buildMemoryListHtml(proposals) {
+    if (!proposals.length) {
+        return `<section class="panel"><p class="page-status">${escapeHtml(STRINGS.memoryEmpty)}</p></section>`;
+    }
+    return `<section class="memory-list">${proposals.map(buildMemoryCard).join('')}</section>`;
+}
+
+function buildMemoryHtml() {
+    const page = state.memoryPage;
+    if (page.loading || !page.data) {
+        return buildPageHtml(STRINGS.memoryHeading, `<p class="page-status">${escapeHtml(STRINGS.loading)}</p>`);
+    }
+    const settings = page.settings || { enabled: false, model: '' };
+    const status = `${settings.enabled ? STRINGS.memoryEnabled : STRINGS.memoryDisabled} · ${STRINGS.memoryModel} ` +
+        `${settings.model ? settings.model : STRINGS.memoryChatModel}`;
+    const header = `<section class="panel">` +
+        `<p class="page-status">${escapeHtml(status)}</p>` +
+        `<div class="panel-actions tasks-header">` +
+        `<button type="button" class="btn" data-action="memory-extract"${page.busy ? ' disabled' : ''}>` +
+        `${escapeHtml(page.busy ? STRINGS.memoryFinding : STRINGS.memoryFind)}</button>` +
+        `<button type="button" class="btn" data-action="memory-all" data-id="reject"${page.busy || !page.data.pending ? ' disabled' : ''}>` +
+        `${escapeHtml(STRINGS.memoryRejectAll)}</button>` +
+        `<button type="button" class="btn btn-primary" data-action="memory-all" data-id="accept"${page.busy || !page.data.pending ? ' disabled' : ''}>` +
+        `${escapeHtml(STRINGS.memoryAcceptAll)}</button>` +
+        `</div></section>`;
+    let banners = '';
+    if (page.error) {
+        banners += `<div class="error-banner" role="alert">${escapeHtml(`${STRINGS.errorBannerPrefix}${page.error}`)}</div>`;
+    }
+    if (page.notice) {
+        banners += `<div class="notice-banner" role="status">${escapeHtml(page.notice)}</div>`;
+    }
+    return buildPageHtml(STRINGS.memoryHeading, header + banners + buildMemoryListHtml(page.data.proposals || []));
 }
 
 function buildSidebarListHtml() {
@@ -2412,6 +2701,7 @@ function render() {
     const pageName = state.route.name === 'settings' ? STRINGS.settingsHeading
         : state.route.name === 'tasks' ? STRINGS.tasksHeading
         : state.route.name === 'profile' ? STRINGS.profileHeading
+        : state.route.name === 'memory' ? STRINGS.memoryHeading
         : state.route.name === 'chat' ? chatTitle(state.route.id)
         : STRINGS.appTitle;
     document.title = state.route.name === 'new' ? STRINGS.appTitle : `${pageName} - ${STRINGS.appTitle}`;
@@ -2420,6 +2710,7 @@ function render() {
     const page = state.route.name === 'settings' ? buildSettingsHtml()
         : state.route.name === 'tasks' ? buildTasksHtml()
         : state.route.name === 'profile' ? buildProfileHtml()
+        : state.route.name === 'memory' ? buildMemoryHtml()
         : null;
     const main = page !== null
         ? page
@@ -2474,6 +2765,8 @@ function buildSidebarHtml(theme) {
         `<a class="nav-item${routeName === 'new' ? ' active' : ''}" href="#/">${ICONS.newChat}<span>${escapeHtml(STRINGS.navChat)}</span></a>` +
         `<a class="nav-item${routeName === 'settings' ? ' active' : ''}" href="#/settings">${ICONS.gear}<span>${escapeHtml(STRINGS.navSettings)}</span></a>` +
         `<a class="nav-item${routeName === 'tasks' ? ' active' : ''}" href="#/tasks">${ICONS.checklist}<span>${escapeHtml(STRINGS.navTasks)}</span></a>` +
+        `<a class="nav-item${routeName === 'memory' ? ' active' : ''}" href="#/memory">${ICONS.memory}<span>${escapeHtml(STRINGS.navMemory)}</span>` +
+        `<span class="nav-badge" data-role="memory-badge"${state.memoryBadge > 0 ? '' : ' style="display:none"'}>${state.memoryBadge}</span></a>` +
 
         `</nav>` +
         (work ? `<p class="workspace-label" title="${escapeHtml(state.workspace)}">${ICONS.folder}<span>${escapeHtml(work)}</span></p>` : '') +
@@ -2529,6 +2822,7 @@ function schedulePoll() {
 
 async function loadConversation(id) {
     stopPolling();
+    state.lastChatId = id;
     state.current = { id, loading: true, error: null, conversation: null, generating: false };
     state.thinkingOpen = {};
     state.toolsOpen = {};
@@ -2581,6 +2875,8 @@ async function pollTick() {
             await refreshConversations();
             // The settings' model may have changed while the reply was generating
             await syncConversationModel();
+            // New auto-memory proposals may have appeared during the reply
+            await refreshMemoryCount();
         }
     } catch (err) {
         cur.error = err.message;
@@ -2832,6 +3128,8 @@ function onHashChange() {
         loadTasksPage();
     } else if (state.route.name === 'profile') {
         loadProfile();
+    } else if (state.route.name === 'memory') {
+        loadMemoryPage();
     }
 }
 
@@ -2866,6 +3164,25 @@ function onRootClick(event) {
             submitEmailSettings();
         } else if (action === 'testConnection') {
             testConnection();
+        } else if (action === 'saveMemory') {
+            submitMemorySettings();
+        } else if (action === 'memory-extract') {
+            extractMemoryNow();
+        } else if (action === 'memory-all') {
+            resolveAllMemoryProposalsAction(id === 'accept');
+        } else if (action === 'memory-accept') {
+            resolveMemoryProposalAction(id, true);
+        } else if (action === 'memory-reject') {
+            resolveMemoryProposalAction(id, false);
+        } else if (action === 'memory-edit') {
+            state.memoryPage.editing = id;
+            render();
+        } else if (action === 'memory-edit-cancel') {
+            state.memoryPage.editing = null;
+            render();
+        } else if (action === 'memory-edit-save') {
+            const input = document.getElementById('memory-edit-input');
+            resolveMemoryProposalAction(id, true, input ? input.value : undefined);
         } else if (action === 'toggleProvider') {
             toggleProviderEnabled(id, actionButton.checked);
         } else if (action === 'settingsTab') {
@@ -3077,6 +3394,15 @@ function onRootKeyDown(event) {
         } else {
             submitProfile();
         }
+    } else if (event.key === 'Enter' && event.target && /^memory-(enabled|model|every|minchars|maxpending)$/.test(event.target.id)) {
+        event.preventDefault();
+        submitMemorySettings();
+    } else if (event.key === 'Enter' && event.target && event.target.id === 'memory-edit-input') {
+        event.preventDefault();
+        const button = document.querySelector('[data-action="memory-edit-save"]');
+        if (button) {
+            resolveMemoryProposalAction(button.dataset.id, true, event.target.value);
+        }
     } else if (event.key === 'Enter' && event.target && (event.target.id === 'task-name' || event.target.id === 'task-time' || event.target.id === 'task-numctx')) {
         // Enter inside a task form field - move the focus to the next field instead of submitting
         const focusables = Array.from(document.querySelectorAll('.modal .form-field input, .modal .form-field textarea'));
@@ -3185,6 +3511,8 @@ async function init() {
             if (state.taskForm) {
                 state.taskForm.model = event.target.value;
             }
+        } else if (event.target.id === 'memory-enabled' && state.settings.data && state.settings.data.memory) {
+            state.settings.data.memory.enabled = event.target.checked;
         }
     });
     render();
@@ -3200,6 +3528,8 @@ async function init() {
     }
     await refreshConversations();
     scheduleSidebarPoll();
+    state.memoryTimer = setInterval(refreshMemoryCount, 15000);
+    refreshMemoryCount();
     if (state.route.name === 'chat') {
         loadConversation(state.route.id);
     } else if (state.route.name === 'settings') {
@@ -3208,6 +3538,8 @@ async function init() {
         loadTasksPage();
     } else if (state.route.name === 'profile') {
         loadProfile();
+    } else if (state.route.name === 'memory') {
+        loadMemoryPage();
     } else {
         render();
     }

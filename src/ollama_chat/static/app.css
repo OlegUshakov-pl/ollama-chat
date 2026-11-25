@@ -410,3 +410,21 @@ button.model-pill:hover { background: var(--accent-soft); color: var(--accent); 
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition-duration: .001ms !important; animation-duration: .001ms !important; }
 }
+
+/* Auto memory */
+.nav-badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: #fff; font-size: 11px; line-height: 1; }
+.memory-notice { max-width: var(--column-width); margin: 12px auto; padding: 8px 14px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font-size: 12.5px; text-align: center; }
+.memory-notice a { color: var(--accent); text-decoration: none; }
+.memory-list { display: grid; gap: 12px; }
+.memory-card { background: var(--surface); border: 1px solid var(--border); padding: 14px 16px; }
+.memory-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.memory-action { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 2px 6px; background: var(--accent-soft); color: var(--accent); }
+.memory-action.memory-update { background: var(--green-soft); color: var(--green); }
+.memory-action.memory-delete { background: var(--code-bg); color: var(--muted); }
+.memory-target { font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+.memory-text { margin: 0; font: 13px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-was { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+.memory-edit-input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); background: var(--bg); color: var(--ink); font: 13px/1.5 var(--font-mono); border-radius: var(--radius); }
+.memory-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.checkbox-field { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 13px; color: var(--ink); }
+.checkbox-field input { accent-color: var(--accent); }

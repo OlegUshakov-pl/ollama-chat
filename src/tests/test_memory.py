@@ -2,6 +2,7 @@
 # https://github.com/craigahobbs/ollama-chat/blob/main/LICENSE
 
 import datetime
+import json
 import os
 import unittest
 import unittest.mock
@@ -9,11 +10,13 @@ import unittest.mock
 import urllib3
 
 from ollama_chat.memory import (
-    MAX_MEMORY_FACTS, USER_FACT_KEYS, daily_file_path, ensure_workspace, filter_memory_facts,
-    find_memory_lines, forget, log_memory_error, memory_context, memory_extraction_model,
-    memory_extraction_message, memory_file_path, memory_settings, normalize_memory_text,
-    pending_path, propose_memory, read_memory_file, read_pending, remember, sanitize_memory_fact,
-    time_context, update_pending, user_timezone, workspace_dir, write_memory_file
+    MAX_MEMORY_FACTS, USER_FACT_KEYS, add_memory_proposals, apply_memory_proposal, daily_file_path,
+    ensure_workspace, filter_memory_facts, find_memory_lines, forget, log_memory_error,
+    memory_context, memory_cursor, memory_extraction_model, memory_extraction_message,
+    memory_fact_line, memory_file_path, memory_settings, normalize_memory_text, pending_path,
+    pop_memory_proposal, propose_memory, read_memory_file, read_pending, remember,
+    restore_memory_proposal, sanitize_memory_fact, set_memory_cursor, time_context, update_pending,
+    user_timezone, workspace_dir, write_memory_file
 )
 
 from .util import create_test_files
@@ -303,9 +306,10 @@ class TestAutoMemory(unittest.TestCase):
     def test_propose_memory(self):
         response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
         response.status = 200
-        response.json.return_value = {'facts': [
+        # Ollama returns the schema-constrained JSON as a string in message.content
+        response.json.return_value = {'message': {'content': json.dumps({'facts': [
             {'action': 'add', 'target': 'memory', 'text': 'Работает над ollama-chat'}
-        ]}
+        ]})}}
         with unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
             mock_pool_manager.return_value.request.return_value = response
             facts = propose_memory(['Работает над ollama-chat'], '', '', 'gemma4:e4b', base_url='http://ollama:11434')
@@ -338,6 +342,33 @@ class TestAutoMemory(unittest.TestCase):
             self.assertEqual(len(logs), 1)
             with open(os.path.join(temp_dir, 'logs', logs[0]), 'r', encoding='utf-8') as log_fh:
                 self.assertIn('memory error:', log_fh.read())
+
+
+    def test_propose_memory_bad_content_json(self):
+        response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+        response.status = 200
+        response.json.return_value = {'message': {'content': 'not json at all'}}
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+            mock_pool_manager.return_value.request.return_value = response
+            self.assertEqual(propose_memory(['some durable fact text'], '', '', 'llm', workspace=temp_dir), [])
+            with open(os.path.join(temp_dir, 'logs', os.listdir(os.path.join(temp_dir, 'logs'))[0]), \
+                      'r', encoding='utf-8') as log_fh:
+                self.assertIn('invalid extraction JSON', log_fh.read())
+
+
+    def test_propose_memory_fenced_json(self):
+        response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+        response.status = 200
+        response.json.return_value = {'message': {
+            'content': '```json\n{"facts": [{"action": "add", "target": "memory", "text": "likes tea"}]}\n```'
+        }}
+        with unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+            mock_pool_manager.return_value.request.return_value = response
+            self.assertEqual( \
+                propose_memory(['likes tea'], '', '', 'llm'), \
+                [{'action': 'add', 'target': 'memory', 'text': 'likes tea'}] \
+            )
 
 
     def test_propose_memory_http_error(self):
@@ -441,3 +472,120 @@ class TestAutoMemory(unittest.TestCase):
     def test_log_memory_error_bad_workspace(self):
         # Even a bad workspace must not raise
         log_memory_error(None, 'something failed')
+
+
+    def test_memory_fact_line(self):
+        now = datetime.datetime(2026, 11, 25, 14, 3, tzinfo=datetime.timezone.utc)
+        self.assertEqual(memory_fact_line('likes tea', now=now), '- 2026-11-25: likes tea')
+
+
+    def test_apply_memory_add(self):
+        test_files = [(('memory', 'MEMORY.md'), '# Memory\n\n')]
+        with create_test_files(test_files) as temp_dir:
+            content = apply_memory_proposal( \
+                temp_dir, {'action': 'add', 'target': 'memory', 'text': 'likes tea'}, \
+                now=datetime.datetime(2026, 11, 25, tzinfo=datetime.timezone.utc) \
+            )
+            self.assertIn('- 2026-11-25: likes tea', content)
+            self.assertEqual(read_memory_file(temp_dir, 'MEMORY.md'), content)
+            self.assertIn('# Memory', read_memory_file(temp_dir, 'MEMORY.md.bak'))
+            self.assertNotIn('likes tea', read_memory_file(temp_dir, 'MEMORY.md.bak'))
+
+
+    def test_apply_memory_update_delete(self):
+        test_files = [(('memory', 'MEMORY.md'), '# Memory\n\n- 2026-11-25: City: Warsaw\n- likes coffee\n')]
+        with create_test_files(test_files) as temp_dir:
+            apply_memory_proposal( \
+                temp_dir, \
+                { \
+                    'action': 'update', 'target': 'memory', 'text': 'City: Rzeszów', \
+                    'matched': '- 2026-11-25: City: Warsaw' \
+                }, \
+                now=datetime.datetime(2026, 11, 25, tzinfo=datetime.timezone.utc) \
+            )
+            content = read_memory_file(temp_dir, 'MEMORY.md')
+            self.assertIn('- 2026-11-25: City: Rzeszów', content)
+            self.assertNotIn('Warsaw', content)
+            self.assertIn('City: Warsaw', read_memory_file(temp_dir, 'MEMORY.md.bak'))
+
+            apply_memory_proposal( \
+                temp_dir, \
+                {'action': 'delete', 'target': 'memory', 'text': 'likes coffee', 'matched': '- likes coffee'} \
+            )
+            self.assertNotIn('coffee', read_memory_file(temp_dir, 'MEMORY.md'))
+
+
+    def test_apply_memory_bad_text(self):
+        with create_test_files([]) as temp_dir:
+            self.assertRaises( \
+                ValueError, apply_memory_proposal, temp_dir, \
+                {'action': 'add', 'target': 'memory', 'text': 'my password is hunter2'} \
+            )
+            self.assertRaises( \
+                ValueError, apply_memory_proposal, temp_dir, \
+                {'action': 'update', 'target': 'memory', 'text': 'likes tea', 'matched': 'missing line'} \
+            )
+            self.assertRaises( \
+                ValueError, apply_memory_proposal, temp_dir, \
+                {'action': 'add', 'target': 'unknown', 'text': 'likes tea'} \
+            )
+
+
+    def test_apply_user_fact(self):
+        test_files = [(('memory', 'USER.md'), '# About the user\n\n- Name: Oleg\n- City: Warsaw\n')]
+        with create_test_files(test_files) as temp_dir:
+            # add updates an existing key
+            apply_memory_proposal(temp_dir, {'action': 'add', 'target': 'user', 'text': 'City: Rzeszów'})
+            content = read_memory_file(temp_dir, 'USER.md')
+            self.assertIn('- City: Rzeszów', content)
+            self.assertNotIn('Warsaw', content)
+
+            # update changes exactly the matched line
+            apply_memory_proposal( \
+                temp_dir, \
+                {'action': 'update', 'target': 'user', 'text': 'Name: Oleg U.', 'matched': '- Name: Oleg'} \
+            )
+            self.assertIn('- Name: Oleg U.', read_memory_file(temp_dir, 'USER.md'))
+
+            # delete removes the matched line
+            apply_memory_proposal( \
+                temp_dir, \
+                {'action': 'delete', 'target': 'user', 'text': 'City: Rzeszów', 'matched': '- City: Rzeszów'} \
+            )
+            self.assertNotIn('Rzeszów', read_memory_file(temp_dir, 'USER.md'))
+            self.assertIn('- City: Rzeszów', read_memory_file(temp_dir, 'USER.md.bak'))
+
+
+    def test_apply_user_fact_profile_limit(self):
+        test_files = [(('memory', 'USER.md'), '# About the user\n\n- Name: Oleg\n')]
+        with create_test_files(test_files) as temp_dir:
+            fact = {'action': 'add', 'target': 'user', 'text': 'Other: ' + 'word ' * 30}
+            self.assertRaises(ValueError, apply_memory_proposal, temp_dir, fact, profile_limit=50)
+            self.assertEqual(read_memory_file(temp_dir, 'USER.md'), test_files[0][1])
+
+
+    def test_add_and_pop_proposals(self):
+        now = datetime.datetime(2026, 11, 25, 14, 3, 11, tzinfo=datetime.timezone.utc)
+        facts = [
+            {'action': 'add', 'target': 'memory', 'text': 'likes tea'},
+            {'action': 'add', 'target': 'user', 'text': 'City: Rzeszów'}
+        ]
+        with create_test_files([]) as temp_dir:
+            added = add_memory_proposals(temp_dir, facts, conversation_id='conv1', created_at=now)
+            self.assertEqual(len(added), 2)
+            self.assertEqual(added[0]['id'], 'p-20261125-0001')
+            self.assertEqual(added[1]['id'], 'p-20261125-0002')
+            self.assertEqual(added[0]['conversationId'], 'conv1')
+            self.assertEqual(added[0]['createdAt'], '2026-11-25T14:03:11+00:00')
+
+            # The queue limit is enforced
+            self.assertEqual(add_memory_proposals(temp_dir, facts, max_pending=2, created_at=now), [])
+
+            # Cursors and pop/restore work under the lock
+            set_memory_cursor(temp_dir, 'conv1', 7)
+            self.assertEqual(memory_cursor(temp_dir, 'conv1'), 7)
+            self.assertEqual(memory_cursor(temp_dir, 'conv2'), 0)
+            self.assertEqual(pop_memory_proposal(temp_dir, added[0]['id']), added[0])
+            self.assertIsNone(pop_memory_proposal(temp_dir, added[0]['id']))
+            restore_memory_proposal(temp_dir, added[0])
+            self.assertEqual(len(read_pending(temp_dir)['proposals']), 2)

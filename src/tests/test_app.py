@@ -11,6 +11,7 @@ import unittest.mock
 import urllib3
 from schema_markdown import encode_query_string
 from ollama_chat.app import DownloadManager, OllamaChat
+from ollama_chat.memory import add_memory_proposals, read_memory_file, read_pending
 
 from .util import create_test_files
 
@@ -44,8 +45,10 @@ class TestApp(unittest.TestCase):
                     'deleteTemplate',
                     'downloadModel',
                     'exportPdf',
+                    'extractMemory',
                     'getConversation',
                     'getConversations',
+                    'getMemoryProposals',
                     'getModels',
                     'getProfile',
                     'getProviderModels',
@@ -65,12 +68,15 @@ class TestApp(unittest.TestCase):
                     'ollamaChatUtil.bare',
                     'regenerateConversationExchange',
                     'replyConversation',
+                    'resolveAllMemoryProposals',
+                    'resolveMemoryProposal',
                     'runTask',
                     'saveProvider',
                     'sendEmail',
                     'setConversationModel',
                     'setConversationTitle',
                     'setEmailSettings',
+                    'setMemorySettings',
                     'setModel',
                     'setProfile',
                     'setTask',
@@ -111,8 +117,10 @@ class TestApp(unittest.TestCase):
                     'deleteTemplate',
                     'downloadModel',
                     'exportPdf',
+                    'extractMemory',
                     'getConversation',
                     'getConversations',
+                    'getMemoryProposals',
                     'getModels',
                     'getProfile',
                     'getProviderModels',
@@ -132,12 +140,15 @@ class TestApp(unittest.TestCase):
                     'ollamaChatUtil.bare',
                     'regenerateConversationExchange',
                     'replyConversation',
+                    'resolveAllMemoryProposals',
+                    'resolveMemoryProposal',
                     'runTask',
                     'saveProvider',
                     'sendEmail',
                     'setConversationModel',
                     'setConversationTitle',
                     'setEmailSettings',
+                    'setMemorySettings',
                     'setModel',
                     'setProfile',
                     'setTask',
@@ -442,7 +453,6 @@ class TestAPI(unittest.TestCase):
                     self.assertDictEqual(json.load(config_fh), expected_config)
 
                 # The workspace is used for the memory files
-                from ollama_chat.memory import read_memory_file  # pylint: disable=import-outside-toplevel
                 self.assertIn('# Memory', read_memory_file(workspace, 'MEMORY.md'))
 
 
@@ -1840,7 +1850,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None, search=False, email=False)
+            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None, search=False, email=False, typed=[False])
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1884,7 +1894,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None, search=False, email=False)
+            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None, search=False, email=False, typed=[False])
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -1927,7 +1937,7 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'id': '12345678-1234-5678-1234-567812345678'})
-            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None, search=False, email=False)
+            mock_manager.assert_called_once_with(app, response['id'], ['Prompt 1'], think=False, files=None, search=False, email=False, typed=[False])
             self.assertIs(app.chats['12345678-1234-5678-1234-567812345678'], mock_manager.return_value)
 
             # Verify the app config
@@ -3177,7 +3187,7 @@ class TestAPI(unittest.TestCase):
             self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {})
 
             # Check that ChatManager was called with the last user prompt
-            mock_manager.assert_called_once_with(app, 'conv1', ['How are you?'])
+            mock_manager.assert_called_once_with(app, 'conv1', ['How are you?'], typed=[False])
             self.assertIs(app.chats['conv1'], mock_manager.return_value)
 
             # Verify the app config
@@ -4067,3 +4077,185 @@ class TestAPI(unittest.TestCase):
             self.assertListEqual(headers, [('Content-Type', 'application/json')])
             response = json.loads(content_bytes.decode('utf-8'))
             self.assertDictEqual(response, {'memory': 65536 * 65536, 'mlx': True})
+
+
+class TestMemoryAPI(unittest.TestCase):
+
+    def _app(self, temp_dir, **config_extra):
+        config = {'conversations': [], 'workspace': os.path.join(temp_dir, 'ws'), **config_extra}
+        config_path = os.path.join(temp_dir, 'ollama-chat.json')
+        with open(config_path, 'w', encoding='utf-8') as config_fh:
+            json.dump(config, config_fh)
+        return OllamaChat(config_path), config['workspace']
+
+
+    def test_get_memory_proposals(self):
+        with create_test_files([]) as temp_dir:
+            app, workspace = self._app(temp_dir)
+            add_memory_proposals(workspace, [
+                {'action': 'add', 'target': 'memory', 'text': 'likes tea'}
+            ], conversation_id='conv1')
+
+            status, _headers, content_bytes = app.request('GET', '/getMemoryProposals')
+            self.assertEqual(status, '200 OK')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertFalse(response['enabled'])
+            self.assertEqual(response['pending'], 1)
+            self.assertEqual(response['proposals'][0]['text'], 'likes tea')
+            self.assertEqual(response['proposals'][0]['conversationId'], 'conv1')
+
+
+    def test_resolve_memory_proposal_accept(self):
+        with create_test_files([]) as temp_dir:
+            app, workspace = self._app(temp_dir)
+            proposal = add_memory_proposals(workspace, [
+                {'action': 'add', 'target': 'memory', 'text': 'likes tea'}
+            ])[0]
+            status, _headers, content_bytes = app.request( \
+                'POST', '/resolveMemoryProposal', \
+                wsgi_input=json.dumps({'id': proposal['id'], 'accept': True}).encode('utf-8') \
+            )
+            self.assertEqual(status, '200 OK')
+            self.assertEqual(json.loads(content_bytes.decode('utf-8')), {'pending': 0})
+            self.assertIn('likes tea', read_memory_file(workspace, 'MEMORY.md'))
+            self.assertTrue(os.path.isfile(os.path.join(workspace, 'memory', 'MEMORY.md.bak')))
+            self.assertEqual(read_pending(workspace)['proposals'], [])
+
+
+    def test_resolve_memory_proposal_edit_and_reject(self):
+        with create_test_files([]) as temp_dir:
+            app, workspace = self._app(temp_dir)
+            proposals = add_memory_proposals(workspace, [
+                {'action': 'add', 'target': 'memory', 'text': 'likes tea'},
+                {'action': 'add', 'target': 'memory', 'text': 'likes coffee'}
+            ])
+            status, _headers, _content = app.request( \
+                'POST', '/resolveMemoryProposal', \
+                wsgi_input=json.dumps( \
+                    {'id': proposals[0]['id'], 'accept': True, 'text': 'likes green tea'} \
+                ).encode('utf-8') \
+            )
+            self.assertEqual(status, '200 OK')
+            self.assertIn('likes green tea', read_memory_file(workspace, 'MEMORY.md'))
+            self.assertNotIn('likes tea\n', read_memory_file(workspace, 'MEMORY.md'))
+
+            status, _headers, content_bytes = app.request( \
+                'POST', '/resolveMemoryProposal', \
+                wsgi_input=json.dumps({'id': proposals[1]['id'], 'accept': False}).encode('utf-8') \
+            )
+            self.assertEqual(status, '200 OK')
+            self.assertEqual(json.loads(content_bytes.decode('utf-8')), {'pending': 0})
+            self.assertNotIn('coffee', read_memory_file(workspace, 'MEMORY.md'))
+
+
+    def test_resolve_memory_proposal_errors(self):
+        with create_test_files([]) as temp_dir:
+            app, workspace = self._app(temp_dir, profileLimit=50)
+            status, _headers, content_bytes = app.request( \
+                'POST', '/resolveMemoryProposal', \
+                wsgi_input=json.dumps({'id': 'missing', 'accept': True}).encode('utf-8') \
+            )
+            self.assertEqual(status, '400 Bad Request')
+            self.assertEqual(json.loads(content_bytes.decode('utf-8'))['error'], 'NotFound')
+
+            bad_text = add_memory_proposals(workspace, [
+                {'action': 'add', 'target': 'memory', 'text': 'likes tea'}
+            ])[0]
+            status, _headers, content_bytes = app.request( \
+                'POST', '/resolveMemoryProposal', \
+                wsgi_input=json.dumps( \
+                    {'id': bad_text['id'], 'accept': True, 'text': 'password: hunter2'} \
+                ).encode('utf-8') \
+            )
+            self.assertEqual(status, '400 Bad Request')
+            self.assertEqual(json.loads(content_bytes.decode('utf-8'))['error'], 'BadText')
+            self.assertEqual(len(read_pending(workspace)['proposals']), 1)
+
+            too_long = add_memory_proposals(workspace, [
+                {'action': 'add', 'target': 'user', 'text': 'Other: ' + 'word ' * 30}
+            ])[0]
+            status, _headers, content_bytes = app.request( \
+                'POST', '/resolveMemoryProposal', \
+                wsgi_input=json.dumps({'id': too_long['id'], 'accept': True}).encode('utf-8') \
+            )
+            self.assertEqual(status, '400 Bad Request')
+            self.assertEqual(json.loads(content_bytes.decode('utf-8'))['error'], 'ProfileTooLong')
+            self.assertEqual(len(read_pending(workspace)['proposals']), 2)
+
+
+    def test_resolve_all_memory_proposals(self):
+        with create_test_files([]) as temp_dir:
+            app, workspace = self._app(temp_dir)
+            add_memory_proposals(workspace, [
+                {'action': 'add', 'target': 'memory', 'text': 'likes tea'},
+                {'action': 'add', 'target': 'memory', 'text': 'likes coffee'}
+            ])
+            status, _headers, content_bytes = app.request( \
+                'POST', '/resolveAllMemoryProposals', wsgi_input=b'{"accept": true}' \
+            )
+            self.assertEqual(status, '200 OK')
+            self.assertDictEqual( \
+                json.loads(content_bytes.decode('utf-8')), {'resolved': 2, 'pending': 0} \
+            )
+            self.assertIn('likes tea', read_memory_file(workspace, 'MEMORY.md'))
+            self.assertIn('likes coffee', read_memory_file(workspace, 'MEMORY.md'))
+
+            add_memory_proposals(workspace, [
+                {'action': 'add', 'target': 'memory', 'text': 'likes juice'}
+            ])
+            status, _headers, content_bytes = app.request( \
+                'POST', '/resolveAllMemoryProposals', wsgi_input=b'{"accept": false}' \
+            )
+            self.assertEqual(status, '200 OK')
+            self.assertDictEqual( \
+                json.loads(content_bytes.decode('utf-8')), {'resolved': 1, 'pending': 0} \
+            )
+            self.assertNotIn('juice', read_memory_file(workspace, 'MEMORY.md'))
+
+
+    def test_extract_memory(self):
+        conversation = {
+            'id': 'conv1', 'model': 'llm', 'provider': 'ollama', 'title': 'Chat',
+            'exchanges': [{'user': 'Я переехал в Жешув', 'model': 'ok', 'typed': 'Я переехал в Жешув'}]
+        }
+        with create_test_files([]) as temp_dir:
+            config = {
+                'conversations': [conversation], 'workspace': os.path.join(temp_dir, 'ws'),
+                'autoMemory': True
+            }
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            with open(config_path, 'w', encoding='utf-8') as config_fh:
+                json.dump(config, config_fh)
+            app = OllamaChat(config_path)
+
+            status, _headers, content_bytes = app.request( \
+                'POST', '/extractMemory', wsgi_input=b'{"id": "missing"}' \
+            )
+            self.assertEqual(status, '400 Bad Request')
+            self.assertEqual(json.loads(content_bytes.decode('utf-8'))['error'], 'UnknownConversationID')
+
+            with unittest.mock.patch('ollama_chat.app.start_memory_extraction', return_value=True) as mock_start:
+                status, _headers, content_bytes = app.request( \
+                    'POST', '/extractMemory', wsgi_input=b'{"id": "conv1"}' \
+                )
+            self.assertEqual(status, '200 OK')
+            self.assertEqual(json.loads(content_bytes.decode('utf-8')), {'started': True})
+            mock_start.assert_called_once_with(app, 'conv1', force=True)
+
+
+    def test_set_memory_settings(self):
+        with create_test_files([]) as temp_dir:
+            app, _workspace = self._app(temp_dir)
+            settings = {
+                'enabled': True, 'model': 'gemma4:e4b', 'every': 5,
+                'minChars': 20, 'maxPending': 10
+            }
+            status, _headers, content_bytes = app.request( \
+                'POST', '/setMemorySettings', wsgi_input=json.dumps(settings).encode('utf-8') \
+            )
+            self.assertEqual(status, '200 OK')
+            self.assertEqual(json.loads(content_bytes.decode('utf-8')), {'memory': settings})
+
+            status, _headers, content_bytes = app.request('GET', '/getSettings')
+            self.assertEqual(status, '200 OK')
+            self.assertEqual(json.loads(content_bytes.decode('utf-8'))['memory'], settings)

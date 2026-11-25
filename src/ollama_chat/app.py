@@ -25,14 +25,15 @@ import chisel
 import urllib3
 import schema_markdown
 
-from .chat import ChatManager, config_conversation, config_template_prompts
+from .chat import ChatManager, config_conversation, config_template_prompts, start_memory_extraction
 from .email_tools import (
     get_email_settings, save_email_settings, send_email as smtp_send_email, test_email_connection
 )
 from .memory import (
     MEMORY_BACKUP_SUFFIX, MEMORY_FILENAME, PROFILE_LIMIT_DEFAULT, USER_MEMORY_FILENAME,
-    daily_file_path, ensure_workspace, memory_file_path, memory_settings, read_memory_file,
-    workspace_dir, write_memory_file
+    apply_memory_proposal, daily_file_path, ensure_workspace,
+    memory_file_path, memory_settings, pop_memory_proposal, read_memory_file, read_pending,
+    restore_memory_proposal, sanitize_memory_fact, workspace_dir, write_memory_file
 )
 from .ollama import ollama_delete, ollama_list, ollama_pull
 from .pdf import conversation_markdown, write_pdf_file
@@ -82,8 +83,10 @@ class OllamaChat(chisel.Application):
         self.add_request(delete_template)
         self.add_request(download_model)
         self.add_request(export_pdf)
+        self.add_request(extract_memory)
         self.add_request(get_conversation)
         self.add_request(get_conversations)
+        self.add_request(get_memory_proposals)
         self.add_request(get_models)
         self.add_request(get_profile)
         self.add_request(get_provider_models)
@@ -97,12 +100,15 @@ class OllamaChat(chisel.Application):
         self.add_request(move_template)
         self.add_request(regenerate_conversation_exchange)
         self.add_request(reply_conversation)
+        self.add_request(resolve_all_memory_proposals)
+        self.add_request(resolve_memory_proposal)
         self.add_request(run_task)
         self.add_request(save_provider)
         self.add_request(send_email_request)
         self.add_request(set_conversation_model)
         self.add_request(set_conversation_title)
         self.add_request(set_email_settings)
+        self.add_request(set_memory_settings)
         self.add_request(set_model)
         self.add_request(set_profile)
         self.add_request(set_task)
@@ -379,6 +385,87 @@ def set_profile(ctx, req):
     return {'saved': True}
 
 
+# Get the pending memory fact proposals and the auto-memory state
+@chisel.action(name='getMemoryProposals', types=OLLAMA_CHAT_TYPES)
+def get_memory_proposals(ctx, unused_req):
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+        enabled = memory_settings(config)['enabled']
+    proposals = read_pending(workspace)['proposals']
+    return {'enabled': enabled, 'proposals': proposals, 'pending': len(proposals)}
+
+
+# Resolve one proposal: reject it, or accept it into MEMORY.md / USER.md. The failed proposal is
+# restored to the queue so the user can fix it. Returns True when the proposal was processed.
+def _resolve_one_proposal(app, workspace, proposal_id, accept, text=None):
+    proposal = pop_memory_proposal(workspace, proposal_id)
+    if proposal is None:
+        raise chisel.ActionError('NotFound')
+    if not accept:
+        return True
+    if text is not None:
+        sanitized = sanitize_memory_fact(text, proposal.get('target'))
+        if sanitized is None:
+            restore_memory_proposal(workspace, proposal)
+            raise chisel.ActionError('BadText')
+        proposal = {**proposal, 'text': sanitized}
+    with app.config() as config:
+        limit = config.get('profileLimit', PROFILE_LIMIT_DEFAULT)
+    try:
+        apply_memory_proposal(workspace, proposal, profile_limit=limit)
+    except ValueError as exc:
+        restore_memory_proposal(workspace, proposal)
+        raise chisel.ActionError(str(exc)) from None
+    return True
+
+
+# Accept or reject one memory fact proposal, optionally accepting an edited text
+@chisel.action(name='resolveMemoryProposal', types=OLLAMA_CHAT_TYPES)
+def resolve_memory_proposal(ctx, req):
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+    _resolve_one_proposal(ctx.app, workspace, req['id'], req['accept'], req.get('text'))
+    return {'pending': len(read_pending(workspace)['proposals'])}
+
+
+# Accept or reject all proposals, one by one, stopping at the first error
+@chisel.action(name='resolveAllMemoryProposals', types=OLLAMA_CHAT_TYPES)
+def resolve_all_memory_proposals(ctx, req):
+    with ctx.app.config() as config:
+        workspace = str(workspace_dir(config))
+    proposals = read_pending(workspace)['proposals']
+    resolved = 0
+    for proposal in proposals:
+        if _resolve_one_proposal(ctx.app, workspace, proposal['id'], req['accept']):
+            resolved += 1
+    return {'resolved': resolved, 'pending': len(read_pending(workspace)['proposals'])}
+
+
+# Start a manual extraction for one conversation (ignores the count and length thresholds)
+@chisel.action(name='extractMemory', types=OLLAMA_CHAT_TYPES)
+def extract_memory(ctx, req):
+    with ctx.app.config() as config:
+        conversation = config_conversation(config, req['id'])
+        if conversation is None:
+            raise chisel.ActionError('UnknownConversationID')
+    return {'started': start_memory_extraction(ctx.app, req['id'], force=True)}
+
+
+# Save the auto-memory settings
+@chisel.action(name='setMemorySettings', types=OLLAMA_CHAT_TYPES)
+def set_memory_settings(ctx, req):
+    try:
+        with ctx.app.config(save=True) as config:
+            config['autoMemory'] = bool(req['enabled'])
+            config['memoryModel'] = str(req['model'] or '')
+            config['memoryEvery'] = int(req['every'])
+            config['memoryMinChars'] = int(req['minChars'])
+            config['memoryMaxPending'] = int(req['maxPending'])
+            return {'memory': memory_settings(config)}
+    except (TypeError, ValueError) as exc:
+        raise chisel.ActionError('BadMemorySettings', str(exc)) from None
+
+
 # Get the tasks' full info, for the tasks page
 @chisel.action(name='getTasks', types=OLLAMA_CHAT_TYPES)
 def get_tasks(ctx, unused_req):
@@ -638,7 +725,8 @@ def start_template(ctx, req):
         # Start the model chat
         ctx.app.chats[id_] = ChatManager(
             ctx.app, id_, prompts,
-            think=req.get('think', False), files=req.get('files'), search=req.get('search', False), email=req.get('email', False)
+            think=req.get('think', False), files=req.get('files'), search=req.get('search', False), email=req.get('email', False),
+            typed=[False] * len(prompts)
         )
 
         # Return the new conversation identifier
@@ -911,7 +999,7 @@ def regenerate_conversation_exchange(ctx, req):
             del exchanges[-1]
 
             # Start the model chat
-            ctx.app.chats[id_] = ChatManager(ctx.app, id_, [prompt])
+            ctx.app.chats[id_] = ChatManager(ctx.app, id_, [prompt], typed=[False])
 
 
 @chisel.action(name='getModels', types=OLLAMA_CHAT_TYPES)

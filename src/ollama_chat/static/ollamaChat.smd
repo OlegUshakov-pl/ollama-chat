@@ -243,8 +243,11 @@ struct ConversationEx (Conversation)
 # A conversation user-model exchange
 struct ConversationExchange
 
-    # The user prompt
+    # The user prompt (as expanded by commands and attachments)
     string user
+
+    # The text the user actually typed, when available. Auto memory reads only this field.
+    optional string typed
 
     # The model response
     string model

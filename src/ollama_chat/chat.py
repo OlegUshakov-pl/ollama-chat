@@ -20,9 +20,11 @@ import threading
 import urllib3
 
 from .memory import ( # pylint: disable=unused-import
-    MEMORY_LIMIT_DEFAULT, MEMORY_FILENAME, USER_MEMORY_FILENAME,
-    find_memory_lines, forget, memory_context, memory_file_path, read_memory_file, remember,
-    time_context, workspace_dir
+    MEMORY_LIMIT_DEFAULT, MEMORY_FILENAME, USER_MEMORY_FILENAME, add_memory_proposals,
+    find_memory_lines, forget, log_memory_error, memory_context, memory_cursor,
+    memory_extraction_model, memory_file_path, memory_ollama_base_url, memory_settings,
+    propose_memory, read_memory_file, read_pending, remember, set_memory_cursor, time_context,
+    workspace_dir
 )
 from .email_tools import EMAIL_CHECK_LIMIT_MAX, EMAIL_TOOLS, check_email, send_email as smtp_send_email
 from .providers.base import ProviderError
@@ -53,6 +55,94 @@ FINAL_ANSWER_PROMPT = (
     'and do not plan any more tool calls. Write your final answer to the conversation now, in the '
     'conversation\'s language, using only the information you have gathered so far.'
 )
+
+
+# Only one memory extraction runs at a time, in the background
+_EXTRACTION_LOCK = threading.Lock()
+_EXTRACTING = False
+
+
+# The typed texts from the exchanges after a cursor - commands and old exchanges are skipped
+def _typed_exchange_texts(exchanges, cursor):
+    texts = []
+    for exchange in exchanges[cursor:] if isinstance(exchanges, list) else []:
+        if not isinstance(exchange, dict):
+            continue
+        typed = exchange.get('typed')
+        if not isinstance(typed, str):
+            continue
+        typed = typed.strip()
+        if not typed or typed.startswith('/'):
+            continue
+        texts.append(typed)
+    return texts
+
+
+# The background extraction thread - never raises into the chat
+def _memory_extraction_thread(app, conversation_id, workspace, model, base_url, typed_texts, max_pending):
+    global _EXTRACTING # pylint: disable=global-statement
+    try:
+        memory_text = read_memory_file(workspace, MEMORY_FILENAME)
+        user_text = read_memory_file(workspace, USER_MEMORY_FILENAME)
+        facts = propose_memory( \
+            typed_texts, memory_text, user_text, model, \
+            pool_manager=app.pool_manager, workspace=workspace, base_url=base_url \
+        )
+        if facts:
+            add_memory_proposals( \
+                workspace, facts, conversation_id=conversation_id, max_pending=max_pending \
+            )
+    except Exception as exc: # pylint: disable=broad-except
+        log_memory_error(workspace, f'background extraction failed: {exc}')
+    finally:
+        with _EXTRACTION_LOCK:
+            _EXTRACTING = False
+
+
+# Start a background memory extraction for a conversation when all conditions hold. "force"
+# (the Memory page's Find facts button) ignores the exchange count and the minimum text length,
+# but never the local-model-only rule or the exclusion of non-typed text.
+def start_memory_extraction(app, conversation_id, force=False):
+    global _EXTRACTING # pylint: disable=global-statement
+    with app.config() as config:
+        settings = memory_settings(config)
+        if not settings['enabled'] and not force:
+            return False
+        conversation = config_conversation(config, conversation_id)
+        if conversation is None or conversation_id in app.chats:
+            return False
+        model = memory_extraction_model(config, conversation.get('provider'), conversation.get('model'))
+        if not model:
+            return False
+        workspace = str(workspace_dir(config))
+        base_url = memory_ollama_base_url(config)
+        exchanges = conversation.get('exchanges') or []
+        cursor = memory_cursor(workspace, conversation_id)
+        typed_texts = _typed_exchange_texts(exchanges, cursor)
+        if not typed_texts:
+            return False
+        if not force:
+            if len(exchanges) - cursor < settings['every']:
+                return False
+            if sum(len(text) for text in typed_texts) < settings['minChars']:
+                return False
+        if len(read_pending(workspace)['proposals']) >= settings['maxPending']:
+            return False
+        new_cursor = len(exchanges)
+
+    with _EXTRACTION_LOCK:
+        if _EXTRACTING:
+            return False
+        _EXTRACTING = True
+
+    set_memory_cursor(workspace, conversation_id, new_cursor)
+    thread = threading.Thread( \
+        target=_memory_extraction_thread, \
+        args=(app, conversation_id, workspace, model, base_url, typed_texts, settings['maxPending']), \
+        daemon=True \
+    )
+    thread.start()
+    return True
 
 
 # Model special tokens (e.g. "<|tool_response|>") that some chat templates leak into the streamed text
@@ -89,14 +179,19 @@ class _StreamTokenFilter():
 
 # The ollama chat manager class
 class ChatManager():
-    __slots__ = ('app', 'conversation_id', 'prompts', 'stop', 'think', 'files', 'search', 'email', 'tool_rounds')
+    __slots__ = (
+        'app', 'conversation_id', 'prompts', 'typed', 'stop', 'think', 'files', 'search', 'email',
+        'tool_rounds'
+    )
 
 
     def __init__(self, app, conversation_id, prompts, think=None, files=None, search=False, email=False, \
-                 tool_rounds=None):
+                 tool_rounds=None, typed=None):
         self.app = app
         self.conversation_id = conversation_id
         self.prompts = list(prompts)
+        # Parallel to prompts: only user-typed prompts are a source for memory extraction
+        self.typed = list(self.prompts) if typed is None else list(typed)
         self.stop = False
         self.think = think
         self.files = files or []
@@ -124,8 +219,12 @@ class ChatManager():
                     conversation = config_conversation(config, chat.conversation_id)
                     model = conversation['model']
 
-                    # Add the next user prompt
-                    conversation['exchanges'].append({'user': chat.prompts[0], 'model': ''})
+                    # Add the next user prompt, remembering the text the user actually typed
+                    exchange = {'user': chat.prompts[0], 'model': ''}
+                    typed_text = chat.typed.pop(0) if chat.typed else None
+                    if isinstance(typed_text, str):
+                        exchange['typed'] = typed_text
+                    conversation['exchanges'].append(exchange)
                     del chat.prompts[0]
 
                     # The conversation's provider - old conversations have no provider and
@@ -241,6 +340,7 @@ class ChatManager():
                             _, template_prompts = config_template_prompts(template, variable_values)
                             for template_prompt in reversed(template_prompts):
                                 chat.prompts.insert(0, template_prompt)
+                                chat.typed.insert(0, None)
 
                             # Add the template message
                             message_values = ', '.join(f'{vname} = "{vval}"' for vname, vval in sorted(variable_values.items()))
@@ -374,6 +474,9 @@ class ChatManager():
             # Delete the application's chat entry
             if chat.conversation_id in chat.app.chats:
                 del chat.app.chats[chat.conversation_id]
+
+        # Propose memory facts in the background, now that this chat isn't generating
+        start_memory_extraction(chat.app, chat.conversation_id)
 
 
 # Helper to find a conversation by ID

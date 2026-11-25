@@ -191,7 +191,10 @@ def write_memory_file(workspace, filename, content):
 
 # The workspace memory file path - USER.md or MEMORY.md - checked to be inside the workspace
 def memory_file_path(workspace, filename):
-    if filename not in (USER_MEMORY_FILENAME, MEMORY_FILENAME, MEMORY_FILENAME + MEMORY_BACKUP_SUFFIX):
+    if filename not in (
+        USER_MEMORY_FILENAME, USER_MEMORY_FILENAME + MEMORY_BACKUP_SUFFIX,
+        MEMORY_FILENAME, MEMORY_FILENAME + MEMORY_BACKUP_SUFFIX
+    ):
         raise ValueError(f'unknown memory file "{filename}"')
     return _safe_path(workspace, 'memory', filename)
 
@@ -518,11 +521,201 @@ def propose_memory(new_user_texts, memory_text, user_text, model, pool_manager=N
         finally:
             response.close()
 
-        facts = body.get('facts') if isinstance(body, dict) else None
+        facts = None
+        if isinstance(body, dict):
+            if isinstance(body.get('facts'), list):
+                facts = body['facts']
+            else:
+                # Ollama puts the schema-constrained JSON in message.content as a string
+                message = body.get('message')
+                content = message.get('content') if isinstance(message, dict) else body.get('content')
+                if isinstance(content, str):
+                    content = re.sub(r'^```(?:json)?\s*', '', content.strip(), flags=re.IGNORECASE)
+                    content = re.sub(r'\s*```$', '', content)
+                    try:
+                        parsed = json.loads(content)
+                    except ValueError as exc:
+                        log_memory_error(workspace, f'invalid extraction JSON: {exc}')
+                        parsed = None
+                    if isinstance(parsed, dict):
+                        facts = parsed.get('facts')
+                    elif isinstance(parsed, list):
+                        facts = parsed
         return filter_memory_facts(facts, memory_text, user_text)
     except Exception as exc:
         log_memory_error(workspace, f'extraction with model "{model}" failed: {exc}')
         return []
+
+
+# A dated line appended to MEMORY.md for an accepted fact
+def memory_fact_line(text, now=None):
+    now = datetime.datetime.now().astimezone() if now is None else now
+    return f'- {now:%Y-%m-%d}: {text}'
+
+
+# Write a memory file, saving its previous content as a .bak backup first
+def _write_memory_backup(workspace, filename, content):
+    path = memory_file_path(workspace, filename)
+    with open(str(path) + MEMORY_BACKUP_SUFFIX, 'w', encoding='utf-8') as backup_fh:
+        backup_fh.write(read_memory_file(workspace, filename))
+    with open(path, 'w', encoding='utf-8') as memory_fh:
+        memory_fh.write(content)
+
+
+# The canonical USER.md fact key of a "- Key: value" line, or None
+def _user_fact_key(line):
+    match = _RE_USER_FACT.match(str(line or '').strip().lstrip('- ').strip())
+    if match is None:
+        return None
+    return next( \
+        (key for key in USER_FACT_KEYS if key.lower() == match.group(1).strip().lower()), \
+        None \
+    )
+
+
+# Apply a user fact to USER.md's content. add updates an existing key or appends a new line;
+# update changes exactly the matched line; delete removes the matched line.
+def _apply_user_fact(content, action, text, matched):
+    lines = content.splitlines()
+    key = _user_fact_key(text)
+    new_line = f'- {text}'
+    if action == 'delete':
+        if isinstance(matched, str) and matched in lines:
+            lines.remove(matched)
+        else:
+            lines = [line for line in lines if _user_fact_key(line) != key]
+    else:
+        ix = lines.index(matched) if action == 'update' and isinstance(matched, str) and matched in lines else None
+        if ix is None:
+            ix = next((index for index, line in enumerate(lines) if _user_fact_key(line) == key), None)
+        if ix is None:
+            lines.append(new_line)
+        else:
+            lines[ix] = new_line
+    return '\n'.join(lines) + ('\n' if lines else '')
+
+
+# Apply one accepted proposal to MEMORY.md or USER.md, making a .bak backup first. A user fact
+# that would exceed profile_limit is rejected without writing. Raises ValueError('BadText') or
+# ValueError('ProfileTooLong') - the app layer maps these to chisel action errors.
+def apply_memory_proposal(workspace, proposal, profile_limit=PROFILE_LIMIT_DEFAULT, now=None):
+    if not isinstance(proposal, dict):
+        raise ValueError('BadText')
+    action = proposal.get('action')
+    target = proposal.get('target')
+    text = sanitize_memory_fact(proposal.get('text'), target)
+    if action not in ('add', 'update', 'delete') or target not in ('memory', 'user') or text is None:
+        raise ValueError('BadText')
+
+    ensure_workspace(workspace)
+    matched = proposal.get('matched')
+    if target == 'memory':
+        lines = read_memory_file(workspace, MEMORY_FILENAME).splitlines()
+        if action == 'add':
+            lines.append(memory_fact_line(text, now))
+        elif isinstance(matched, str) and matched in lines:
+            ix = lines.index(matched)
+            if action == 'update':
+                lines[ix] = memory_fact_line(text, now)
+            else:
+                del lines[ix]
+        else:
+            raise ValueError('BadText')
+        content = '\n'.join(lines) + ('\n' if lines else '')
+        _write_memory_backup(workspace, MEMORY_FILENAME, content)
+    else:
+        content = _apply_user_fact( \
+            read_memory_file(workspace, USER_MEMORY_FILENAME), action, text, matched \
+        )
+        if len(content) > profile_limit:
+            raise ValueError('ProfileTooLong')
+        _write_memory_backup(workspace, USER_MEMORY_FILENAME, content)
+    return content
+
+
+# The next unique proposal ID for the day
+def _new_proposal_id(used_ids, now):
+    prefix = f'p-{now:%Y%m%d}-'
+    index = 1
+    while True:
+        proposal_id = f'{prefix}{index:04d}'
+        if proposal_id not in used_ids:
+            return proposal_id
+        index += 1
+
+
+# Add extracted facts as pending proposals under the lock, up to max_pending. Each proposal gets
+# an ID, a conversation ID and a creation timestamp; facts over the queue limit are ignored.
+def add_memory_proposals(workspace, facts, conversation_id=None, \
+                         max_pending=AUTOMEMORY_MAX_PENDING_DEFAULT, created_at=None):
+    now = datetime.datetime.now().astimezone() if created_at is None else created_at
+    with _PENDING_LOCK:
+        pending = read_pending(workspace)
+        room = max(0, max_pending - len(pending['proposals']))
+        used_ids = { \
+            proposal.get('id') for proposal in pending['proposals'] if isinstance(proposal, dict) \
+        }
+        added = []
+        for fact in (facts or [])[:room]:
+            if not isinstance(fact, dict):
+                continue
+            proposal_id = _new_proposal_id(used_ids, now)
+            used_ids.add(proposal_id)
+            proposal = {
+                'id': proposal_id,
+                'createdAt': now.isoformat(timespec='seconds'),
+                **{ \
+                    key: fact[key] for key in ('action', 'target', 'text', 'replaces', 'matched') \
+                    if key in fact and fact[key] is not None \
+                }
+            }
+            if conversation_id is not None:
+                proposal['conversationId'] = conversation_id
+            pending['proposals'].append(proposal)
+            added.append(proposal)
+        if added:
+            write_pending(workspace, pending)
+        return added
+
+
+# Remove and return a proposal by ID, or None when it isn't pending
+def pop_memory_proposal(workspace, proposal_id):
+    with _PENDING_LOCK:
+        pending = read_pending(workspace)
+        index = next( \
+            ( \
+                ix for ix, proposal in enumerate(pending['proposals']) \
+                if isinstance(proposal, dict) and proposal.get('id') == proposal_id \
+            ), \
+            None \
+        )
+        if index is None:
+            return None
+        proposal = pending['proposals'].pop(index)
+        write_pending(workspace, pending)
+        return proposal
+
+
+# Put a proposal back at the head of the queue (used when accepting it fails)
+def restore_memory_proposal(workspace, proposal):
+    with _PENDING_LOCK:
+        pending = read_pending(workspace)
+        pending['proposals'].insert(0, proposal)
+        write_pending(workspace, pending)
+
+
+# The number of exchanges already processed for a conversation
+def memory_cursor(workspace, conversation_id):
+    with _PENDING_LOCK:
+        return read_pending(workspace)['cursors'].get(conversation_id, 0)
+
+
+# Record the exchange cursor of a conversation's last extraction
+def set_memory_cursor(workspace, conversation_id, cursor):
+    with _PENDING_LOCK:
+        pending = read_pending(workspace)
+        pending['cursors'][conversation_id] = cursor
+        write_pending(workspace, pending)
 
 
 # The memory context to inject into the chat's system prompt, or None when there's nothing

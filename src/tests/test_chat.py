@@ -19,9 +19,10 @@ from ollama_chat.app import OllamaChat
 from ollama_chat.chat import (
     FINAL_ANSWER_PROMPT,
     _escape_markdown_text, _process_commands, _run_tool, _tool_call_arguments, _StreamTokenFilter,
-    config_template_prompts, ChatManager
+    _typed_exchange_texts, config_conversation, config_template_prompts, ChatManager,
+    start_memory_extraction
 )
-from ollama_chat.memory import memory_context, time_context
+from ollama_chat.memory import add_memory_proposals, memory_context, memory_cursor, time_context
 from ollama_chat.tasks import load_tasks
 from ollama_chat.web_tools import WEB_TOOLS
 
@@ -50,6 +51,16 @@ def record_requests(responses, requests):
         requests.append((args, copy.deepcopy(kwargs.get('json'))))
         return responses.pop(0)
     return request
+
+
+# The auto memory adds a "typed" field to exchanges; legacy config assertions compare the
+# chat behavior, so strip the field before comparing.
+def without_typed(config):
+    config = copy.deepcopy(config)
+    for conversation in config.get('conversations', []):
+        for exchange in conversation.get('exchanges', []):
+            exchange.pop('typed', None)
+    return config
 
 
 # Helper to build a base64-encoded docx attachment
@@ -196,11 +207,11 @@ class TestChatManager(unittest.TestCase):
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
-                self.assertEqual(json.load(config_fh), expected_config)
+                self.assertEqual(without_typed(json.load(config_fh)), expected_config)
 
 
     def test_chat_fn_memory(self):
@@ -339,7 +350,7 @@ class TestChatManager(unittest.TestCase):
 
             # Verify the app config - the attachments are remembered on the exchange
             with app.config() as config:
-                self.assertDictEqual(config, {
+                self.assertDictEqual(without_typed(config), {
                     'conversations': [
                         {
                             'id': 'conv1',
@@ -484,7 +495,7 @@ class TestChatManager(unittest.TestCase):
 
             # Verify the app config
             with app.config() as config:
-                self.assertDictEqual(config, {
+                self.assertDictEqual(without_typed(config), {
                     'conversations': [
                         {
                             'id': 'conv1',
@@ -635,11 +646,11 @@ class TestChatManager(unittest.TestCase):
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
-                self.assertEqual(json.load(config_fh), expected_config)
+                self.assertEqual(without_typed(json.load(config_fh)), expected_config)
 
 
     def test_chat_fn_cloud_chunking(self):
@@ -708,7 +719,7 @@ class TestChatManager(unittest.TestCase):
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
 
     def test_chat_fn_truncated_stream(self):
@@ -767,7 +778,7 @@ class TestChatManager(unittest.TestCase):
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
 
     def test_chat_fn_stalled_stream(self):
@@ -835,7 +846,7 @@ class TestChatManager(unittest.TestCase):
                     ]
                 }
                 with app.config() as config:
-                    self.assertDictEqual(config, expected_config)
+                    self.assertDictEqual(without_typed(config), expected_config)
 
 
     def test_chat_fn_error_show(self):
@@ -899,11 +910,11 @@ class TestChatManager(unittest.TestCase):
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
-                self.assertEqual(json.load(config_fh), expected_config)
+                self.assertEqual(without_typed(json.load(config_fh)), expected_config)
 
 
     def test_chat_fn_error_chat(self):
@@ -985,11 +996,11 @@ class TestChatManager(unittest.TestCase):
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
-                self.assertEqual(json.load(config_fh), expected_config)
+                self.assertEqual(without_typed(json.load(config_fh)), expected_config)
 
 
     def test_chat_fn_error_chat_chunk(self):
@@ -1074,11 +1085,11 @@ class TestChatManager(unittest.TestCase):
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
-                self.assertEqual(json.load(config_fh), expected_config)
+                self.assertEqual(without_typed(json.load(config_fh)), expected_config)
 
 
     def test_chat_fn_stop(self):
@@ -1150,11 +1161,11 @@ class TestChatManager(unittest.TestCase):
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
-                self.assertEqual(json.load(config_fh), expected_config)
+                self.assertEqual(without_typed(json.load(config_fh)), expected_config)
 
 
     def test_chat_fn_help(self):
@@ -1197,7 +1208,7 @@ class TestChatManager(unittest.TestCase):
                 exchange = config['conversations'][0]['exchanges'][0]
                 self.assertTrue(exchange['model'].startswith('```\nusage: /{?,dir,do,file,image,url,forget,memory,remember,tasks,task}'))
                 del exchange['model']
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
@@ -1205,7 +1216,7 @@ class TestChatManager(unittest.TestCase):
                 exchange = config['conversations'][0]['exchanges'][0]
                 self.assertTrue(exchange['model'].startswith('```\nusage: /{?,dir,do,file,image,url,forget,memory,remember,tasks,task}'))
                 del exchange['model']
-                self.assertEqual(config, expected_config)
+                self.assertEqual(without_typed(config), expected_config)
 
 
     def test_chat_fn_show(self):
@@ -1267,11 +1278,11 @@ file content
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
-                self.assertEqual(json.load(config_fh), expected_config)
+                self.assertEqual(without_typed(json.load(config_fh)), expected_config)
 
 
     def test_chat_fn_do(self):
@@ -1340,11 +1351,11 @@ file content
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
-                self.assertEqual(json.load(config_fh), expected_config)
+                self.assertEqual(without_typed(json.load(config_fh)), expected_config)
 
 
     def test_chat_fn_do_variables(self):
@@ -1425,11 +1436,11 @@ file content
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
-                self.assertEqual(json.load(config_fh), expected_config)
+                self.assertEqual(without_typed(json.load(config_fh)), expected_config)
 
 
     def test_chat_fn_do_unknown_template(self):
@@ -1479,11 +1490,11 @@ file content
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
-                self.assertEqual(json.load(config_fh), expected_config)
+                self.assertEqual(without_typed(json.load(config_fh)), expected_config)
 
     def test_chat_fn_web_search(self):
         test_files = [
@@ -1586,11 +1597,11 @@ file content
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
             # Verify the config file
             with open(config_path, 'r', encoding='utf-8') as config_fh:
-                self.assertEqual(json.load(config_fh), expected_config)
+                self.assertEqual(without_typed(json.load(config_fh)), expected_config)
 
     def test_chat_fn_email_tools(self):
         test_files = [
@@ -1685,7 +1696,7 @@ file content
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
     def test_chat_fn_send_email_requires_confirmation(self):
         test_files = [
@@ -1762,7 +1773,7 @@ file content
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
     def test_chat_fn_email_unsupported_model(self):
         test_files = [
@@ -1828,7 +1839,7 @@ file content
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
     def test_chat_fn_web_search_unsupported_model(self):
         test_files = [
@@ -1894,7 +1905,7 @@ file content
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
     def test_chat_fn_web_search_tool_error(self):
         test_files = [
@@ -1982,7 +1993,7 @@ file content
                 ]
             }
             with app.config() as config:
-                self.assertDictEqual(config, expected_config)
+                self.assertDictEqual(without_typed(config), expected_config)
 
     def test_chat_fn_web_search_limit(self):
         test_files = [
@@ -2847,3 +2858,138 @@ class TestStreamTokenFilter(unittest.TestCase):
         stream_filter = _StreamTokenFilter()
         self.assertEqual(stream_filter.add('a < b || c > d'), 'a < b || c > d')
         self.assertEqual(stream_filter.tail, '')
+
+
+class TestAutoMemoryChat(unittest.TestCase):
+
+    def setUp(self):
+        self.extraction_patch = unittest.mock.patch('ollama_chat.chat._EXTRACTING', False)
+        self.extraction_patch.start()
+        self.addCleanup(self.extraction_patch.stop)
+
+
+    def test_chat_stores_typed_prompt(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Chat', 'exchanges': []}
+                ]
+            }))
+        ]
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch('threading.Thread') as mock_thread, \
+             unittest.mock.patch('urllib3.PoolManager') as mock_pool_manager:
+            mock_show_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_show_response.status = 200
+            mock_show_response.json.return_value = {'capabilities': []}
+            mock_chat_response = unittest.mock.Mock(spec=urllib3.response.HTTPResponse)
+            mock_chat_response.status = 200
+            mock_chat_response.read_chunked.return_value = [
+                json.dumps({'message': {'content': 'Hi'}}).encode('utf-8')
+            ]
+            mock_pool_manager.return_value.request.side_effect = [mock_show_response, mock_chat_response]
+
+            app = OllamaChat(os.path.join(temp_dir, 'ollama-chat.json'))
+            chat_manager = ChatManager(app, 'conv1', ['Я живу в Жешуве'])
+            app.chats['conv1'] = chat_manager
+            ChatManager.chat_thread_fn(chat_manager)
+
+            with app.config() as config:
+                exchanges = config_conversation(config, 'conv1')['exchanges']
+            self.assertEqual(exchanges[0]['typed'], 'Я живу в Жешуве')
+            self.assertEqual(exchanges[0]['user'], 'Я живу в Жешуве')
+
+
+    def test_typed_exchange_texts(self):
+        exchanges = [
+            {'user': 'full', 'model': 'x', 'typed': 'Я живу в Жешуве'},
+            {'user': 'cmd', 'model': 'x', 'typed': '/remember likes tea'},
+            {'user': 'attachment', 'model': 'x'},
+            {'user': 'old', 'model': 'x', 'typed': 'old typed'}
+        ]
+        self.assertEqual(_typed_exchange_texts(exchanges, 0), ['Я живу в Жешуве', 'old typed'])
+        self.assertEqual(_typed_exchange_texts(exchanges, 3), ['old typed'])
+
+
+    def _memory_app(self, temp_dir, **config_extra):
+        conversation = {
+            'id': 'conv1', 'model': 'llm', 'provider': 'ollama', 'title': 'Chat',
+            'exchanges': [
+                {'user': f'long enough typed message number {ix}', 'model': 'ok',
+                 'typed': f'long enough typed message number {ix}'}
+                for ix in range(3)
+            ]
+        }
+        config = {
+            'conversations': [conversation], 'workspace': os.path.join(temp_dir, 'ws'),
+            'autoMemory': True, 'memoryEvery': 3, 'memoryMinChars': 40,
+            **config_extra
+        }
+        config_path = os.path.join(temp_dir, 'ollama-chat.json')
+        with open(config_path, 'w', encoding='utf-8') as config_fh:
+            json.dump(config, config_fh)
+        return OllamaChat(config_path)
+
+
+    def test_extraction_triggers_and_cursor(self):
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch('ollama_chat.chat.threading.Thread') as mock_thread:
+            app = self._memory_app(temp_dir)
+
+            # Generating chats never trigger extraction
+            app.chats['conv1'] = object()
+            self.assertFalse(start_memory_extraction(app, 'conv1'))
+            del app.chats['conv1']
+
+            self.assertTrue(start_memory_extraction(app, 'conv1'))
+            self.assertEqual(mock_thread.call_count, 1)
+            self.assertTrue(mock_thread.call_args.kwargs['daemon'])
+            self.assertEqual(memory_cursor(os.path.join(temp_dir, 'ws'), 'conv1'), 3)
+
+            # The cursor skips already processed exchanges
+            self.assertFalse(start_memory_extraction(app, 'conv1'))
+
+            # A manual run ignores the thresholds but still needs new typed text
+            self.assertFalse(start_memory_extraction(app, 'conv1', force=True))
+
+
+    def test_extraction_disabled_and_cloud(self):
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch('ollama_chat.chat.threading.Thread') as mock_thread:
+            app = self._memory_app(temp_dir, autoMemory=False)
+            self.assertFalse(start_memory_extraction(app, 'conv1'))
+
+            app = self._memory_app(temp_dir, providers=[
+                {'id': 'openai', 'name': 'OpenAI', 'type': 'openai'}
+            ])
+            with app.config(save=True) as config:
+                config['conversations'][0]['provider'] = 'openai'
+            self.assertFalse(start_memory_extraction(app, 'conv1'))
+
+            # An explicit local memory model is allowed for a cloud conversation
+            app = self._memory_app( \
+                temp_dir, memoryModel='gemma4:e4b',
+                providers=[{'id': 'openai', 'name': 'OpenAI', 'type': 'openai'}]
+            )
+            with app.config(save=True) as config:
+                config['conversations'][0]['provider'] = 'openai'
+            self.assertTrue(start_memory_extraction(app, 'conv1'))
+            self.assertEqual(mock_thread.call_count, 1)
+
+
+    def test_extraction_thresholds_and_queue(self):
+        with create_test_files([]) as temp_dir, \
+             unittest.mock.patch('ollama_chat.chat.threading.Thread') as mock_thread:
+            app = self._memory_app(temp_dir, memoryEvery=4)
+            self.assertFalse(start_memory_extraction(app, 'conv1'))
+
+            app = self._memory_app(temp_dir, memoryMinChars=1000)
+            self.assertFalse(start_memory_extraction(app, 'conv1'))
+
+            app = self._memory_app(temp_dir, memoryMaxPending=1)
+            add_memory_proposals( \
+                os.path.join(temp_dir, 'ws'), \
+                [{'action': 'add', 'target': 'memory', 'text': 'likes tea'}], max_pending=5 \
+            )
+            self.assertFalse(start_memory_extraction(app, 'conv1'))
+            mock_thread.assert_not_called()
