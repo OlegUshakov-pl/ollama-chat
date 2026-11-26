@@ -28,6 +28,7 @@
 - **Settings and Tasks pages** — the home page is chat-only now: workspace and Gmail (IMAP/SMTP) settings moved to **Settings** (`#/settings`), the task manager moved to **Tasks** (`#/tasks`). The sidebar shows the workspace name and `Settings` / `Tasks` links. The server binds to `127.0.0.1` only.
 - **Gmail / email settings in the app** — IMAP/SMTP host+port, login and an app password are edited on the Settings page and written to `<workspace>/.env` (same format as `.env.example`). The password is write-only: it is never stored in `ollama-chat.json`, never committed to git and never sent back to the browser (only a `hasPassword` flag is returned). **Test connection** logs in to both servers without sending anything.
 - **Profile page (`#/profile`)** — a form (name, profession, country, city, time zone, languages, interests, equipment, reply style, …) that fills `memory/USER.md`; the form can be switched to a raw **Text** mode to edit `USER.md` as markdown. `USER.md` is added to the system prompt of every message (character limit: config key `profileLimit`, default `1500`), and the current date and time (time zone from `USER.md`'s `Timezone` line, or local) are injected with it. API: `GET /getProfile`, `POST /setProfile`.
+- **Pinned chats** — right-click a chat (or use its ⋮ menu) and choose **Pin**; it moves to a separate **PINNED** section above **TASKS**, is not duplicated in **CHATS**, and stays pinned across restarts. **Unpin** returns it to the normal list. The flag is stored in `ollama-chat.json` via the new `POST /setConversationPinned` action.
 - **AI Providers (`#/settings` → AI)** — cloud providers (OpenAI, Anthropic, Google/Gemini, Mistral, Groq, DeepSeek, OpenRouter, OpenCode) plus any custom OpenAI-compatible server. Each provider has its own API key (stored AES-GCM encrypted), base URL and default model; keys are write-only and never sent to the browser. Select a provider by card, check the key, refresh the model list. Ollama remains the default provider.
 
 ## Quick start
@@ -94,6 +95,7 @@ ollama-chat -t askAristotle -v question "Why is the sky blue?"
 - **SVG preview** — `svg` code blocks are drawn as a picture (sanitized), Python blocks are syntax-highlighted
 - **Image viewer** — model reply images render enlarged; click opens a lightbox with the original link
 - **Rename / Delete / Download .md / Regenerate** per chat
+- **Pin / Unpin chats** — a PINNED section in the sidebar, persisted in `ollama-chat.json`
 - Prompt commands `/file`, `/dir`, `/image`, `/url`, `/memory`, `/remember`, `/forget`, `/do`, `/?`, `/tasks`, `/task`
 - **Workspace memory** (`USER.md` + `MEMORY.md`) injected into every model turn
 - **Auto memory** — local model proposes facts, you confirm them on the `#/memory` page; off by default
@@ -151,6 +153,9 @@ Markdown images in a model answer (`![alt](http…)` or `![alt](data:image/…)`
 - the overlay is appended to `document.body`, so message re-renders during polling do not close it;
 - the bar under the picture shows the image `alt` and an `Open original` link (`target="_blank"`, `rel="noopener noreferrer"`) when the source is a plain `http(s)` URL — `data:` sources get no link;
 - close with `Esc` (`onKeyDown`), a click on the backdrop or the ✕ button; navigating to another chat closes it too (`onHashChange`).
+
+### Pinned chats
+Right-click a chat in the sidebar to open its context menu and choose **Pin** (or **Unpin**). The same item is available in the chat's ⋮ menu. Pinned chats appear in a **PINNED** section above **TASKS**, in the same newest-first order; they are removed from **CHATS** while pinned. The menu closes on an outside click, `Esc` or scroll, and stays inside the window. Clicking a pinned chat opens it exactly like any other chat. The flag is sent to `POST /setConversationPinned` (`{id, pinned}`) and saved in `ollama-chat.json`, so it survives an application restart; old configs without the field are read as unpinned.
 
 ### Prompt commands
 Implemented in `src/ollama_chat/chat.py`:
@@ -449,7 +454,7 @@ nano $HOME/.local/share/applications/ollama-chat.desktop
 
 [Ollama Chat File Format](https://craigahobbs.github.io/ollama-chat/api.html#var.vName='OllamaChatConfig')
 [Ollama Chat API](https://craigahobbs.github.io/ollama-chat/api.html)
-Schema: `src/ollama_chat/static/ollamaChat.smd` — fork adds `think`/`files`/`search` to `StartConversation`/`ReplyConversation`/`StartTemplate`, `tools` to `ConversationExchange`, `tasks`/`TaskInfo` to `getConversations`, `workspace`/`memoryLimit`/`tasksCatchUp` to `OllamaChatConfig` plus the `setWorkspace` endpoint, and the `exportPdf` endpoint. The Settings/Tasks pages add the `getSettings`, `setEmailSettings`, `testEmailConnection`, `getTasks`, `setTask`, `deleteTask`, `runTask` and `getTaskLog` endpoints with the `TaskDetails`/`TaskInput`/`TaskLog`/`EmailSettings`/`SettingsInfo` types. Auto memory adds `autoMemory`/`memoryModel`/`memoryEvery`/`memoryMinChars`/`memoryMaxPending` to `OllamaChatConfig`, the `MemoryProposal`/`MemorySettings` types and the `getMemoryProposals`, `resolveMemoryProposal`, `resolveAllMemoryProposals`, `extractMemory` and `setMemorySettings` endpoints.
+Schema: `src/ollama_chat/static/ollamaChat.smd` — fork adds `think`/`files`/`search` to `StartConversation`/`ReplyConversation`/`StartTemplate`, `tools` to `ConversationExchange`, `pinned` to `ConversationInfo` and the `setConversationPinned` endpoint, `tasks`/`TaskInfo` to `getConversations`, `workspace`/`memoryLimit`/`tasksCatchUp` to `OllamaChatConfig` plus the `setWorkspace` endpoint, and the `exportPdf` endpoint. The Settings/Tasks pages add the `getSettings`, `setEmailSettings`, `testEmailConnection`, `getTasks`, `setTask`, `deleteTask`, `runTask` and `getTaskLog` endpoints with the `TaskDetails`/`TaskInput`/`TaskLog`/`EmailSettings`/`SettingsInfo` types. Auto memory adds `autoMemory`/`memoryModel`/`memoryEvery`/`memoryMinChars`/`memoryMaxPending` to `OllamaChatConfig`, the `MemoryProposal`/`MemorySettings` types and the `getMemoryProposals`, `resolveMemoryProposal`, `resolveAllMemoryProposals`, `extractMemory` and `setMemorySettings` endpoints.
 
 ## Development
 

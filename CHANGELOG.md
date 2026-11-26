@@ -4,6 +4,12 @@
 
 ### Added
 
+- **Pinned chats.** Right-click a chat (or use its chat menu) to Pin / Unpin it. Pinned chats are
+  shown in a separate **PINNED** section above **TASKS**, are not repeated in **CHATS**, and stay
+  pinned after a restart. The `pinned` flag is stored in `ollama-chat.json` via the new
+  `POST /setConversationPinned` action; conversations in old configs without the field are treated
+  as unpinned. The right-click menu also offers Rename, Download .md and Delete, closes on an
+  outside click / `Esc` / scroll and is clamped to the window.
 - **Automatic memory proposals.** A local Ollama model suggests durable facts after chat replies.
   Nothing is written to `USER.md` or `MEMORY.md` until the fact is confirmed on the new `#/memory`
   page. Only text the user typed is analyzed — attachments, web pages, tool results, command output

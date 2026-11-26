@@ -74,6 +74,7 @@ class TestApp(unittest.TestCase):
                     'saveProvider',
                     'sendEmail',
                     'setConversationModel',
+                    'setConversationPinned',
                     'setConversationTitle',
                     'setEmailSettings',
                     'setMemorySettings',
@@ -146,6 +147,7 @@ class TestApp(unittest.TestCase):
                     'saveProvider',
                     'sendEmail',
                     'setConversationModel',
+                    'setConversationPinned',
                     'setConversationTitle',
                     'setEmailSettings',
                     'setMemorySettings',
@@ -2711,6 +2713,96 @@ class TestAPI(unittest.TestCase):
                 self.assertDictEqual(config, original_config)
 
             # Verify the config file
+            with open(config_path, 'r', encoding='utf-8') as config_fh:
+                self.assertEqual(json.load(config_fh), original_config)
+
+
+    def test_get_conversations_pinned(self):
+        # Old configs have no pinned field: it is reported as false. Explicitly pinned chats
+        # keep their flag in the getConversations answer.
+        test_files = [
+            ('ollama-chat.json', json.dumps({'conversations': [
+                {'id': 'conv1', 'model': 'llm', 'title': 'Old chat', 'exchanges': []},
+                {'id': 'conv2', 'model': 'llm', 'title': 'Pinned chat', 'pinned': True, 'exchanges': []}
+            ]}))
+        ]
+        with create_test_files(test_files) as temp_dir, \
+             unittest.mock.patch.dict(os.environ, {'OLLAMA_CHAT_WORKSPACE': temp_dir}):
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            status, _headers, content_bytes = app.request('GET', '/getConversations')
+            self.assertEqual(status, '200 OK')
+            response = json.loads(content_bytes.decode('utf-8'))
+            self.assertListEqual(
+                [(conversation['id'], conversation['pinned']) for conversation in response['conversations']],
+                [('conv1', False), ('conv2', True)]
+            )
+
+
+    def test_set_conversation_pinned_success(self):
+        test_files = [
+            ('ollama-chat.json', json.dumps({
+                'conversations': [{'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}]
+            }))
+        ]
+        with create_test_files(test_files) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            # Pin, then unpin the conversation
+            status, headers, content_bytes = app.request('POST', '/setConversationPinned', \
+                wsgi_input=json.dumps({'id': 'conv1', 'pinned': True}).encode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            self.assertListEqual(headers, [('Content-Type', 'application/json')])
+            self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {})
+
+            expected_config = {
+                'conversations': [
+                    {'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'pinned': True, 'exchanges': []}
+                ]
+            }
+            with app.config() as config:
+                self.assertDictEqual(config, expected_config)
+            # The flag must survive a restart (i.e. it is written to ollama-chat.json)
+            with open(config_path, 'r', encoding='utf-8') as config_fh:
+                self.assertEqual(json.load(config_fh), expected_config)
+
+            status, _headers, content_bytes = app.request('POST', '/setConversationPinned', \
+                wsgi_input=json.dumps({'id': 'conv1', 'pinned': False}).encode('utf-8'))
+            self.assertEqual(status, '200 OK')
+            expected_config['conversations'][0]['pinned'] = False
+            with open(config_path, 'r', encoding='utf-8') as config_fh:
+                self.assertEqual(json.load(config_fh), expected_config)
+
+
+    def test_set_conversation_pinned_unknown_id(self):
+        with create_test_files([]) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+
+            status, _headers, content_bytes = app.request('POST', '/setConversationPinned', \
+                wsgi_input=json.dumps({'id': 'conv2', 'pinned': True}).encode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {'error': 'UnknownConversationID'})
+            self.assertFalse(os.path.exists(config_path))
+
+
+    def test_set_conversation_pinned_busy(self):
+        original_config = {
+            'conversations': [{'id': 'conv1', 'model': 'llm', 'title': 'Conversation 1', 'exchanges': []}]
+        }
+        with create_test_files([('ollama-chat.json', json.dumps(original_config))]) as temp_dir:
+            config_path = os.path.join(temp_dir, 'ollama-chat.json')
+            app = OllamaChat(config_path)
+            app.chats['conv1'] = unittest.mock.Mock()
+
+            status, _headers, content_bytes = app.request('POST', '/setConversationPinned', \
+                wsgi_input=json.dumps({'id': 'conv1', 'pinned': True}).encode('utf-8'))
+            self.assertEqual(status, '400 Bad Request')
+            self.assertDictEqual(json.loads(content_bytes.decode('utf-8')), {'error': 'ConversationBusy'})
+            with app.config() as config:
+                self.assertDictEqual(config, original_config)
             with open(config_path, 'r', encoding='utf-8') as config_fh:
                 self.assertEqual(json.load(config_fh), original_config)
 

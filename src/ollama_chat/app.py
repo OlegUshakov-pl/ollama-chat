@@ -106,6 +106,7 @@ class OllamaChat(chisel.Application):
         self.add_request(save_provider)
         self.add_request(send_email_request)
         self.add_request(set_conversation_model)
+        self.add_request(set_conversation_pinned)
         self.add_request(set_conversation_title)
         self.add_request(set_email_settings)
         self.add_request(set_memory_settings)
@@ -255,6 +256,7 @@ def get_conversations(ctx, unused_req):
                     'id': conversation['id'],
                     'model': conversation['model'],
                     'title': conversation['title'],
+                    'pinned': bool(conversation.get('pinned', False)),
                     'generating': conversation['id'] in ctx.app.chats,
                     **({'provider': conversation['provider']} if conversation.get('provider') else {}),
                     **({'taskId': conversation['taskId']} if conversation.get('taskId') else {})
@@ -903,6 +905,24 @@ def set_conversation_model(ctx, req):
         if req.get('provider'):
             conversation['provider'] = _validated_provider(config, req['provider'])
         return {'model': conversation['model']}
+
+
+# Pin or unpin a conversation. The flag is saved in ollama-chat.json next to the title, so that
+# pinned chats stay pinned across application restarts.
+@chisel.action(name='setConversationPinned', types=OLLAMA_CHAT_TYPES)
+def set_conversation_pinned(ctx, req):
+    with ctx.app.config(save=True) as config:
+        id_ = req['id']
+        conversation = config_conversation(config, id_)
+        if conversation is None:
+            raise chisel.ActionError('UnknownConversationID')
+
+        # Busy?
+        if id_ in ctx.app.chats:
+            raise chisel.ActionError('ConversationBusy')
+
+        # Set the conversation's pinned flag (absent on older conversations means false)
+        conversation['pinned'] = bool(req['pinned'])
 
 
 @chisel.action(name='setConversationTitle', types=OLLAMA_CHAT_TYPES)

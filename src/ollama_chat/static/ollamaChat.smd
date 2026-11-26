@@ -21,6 +21,9 @@ struct ConversationInfo
     # The conversation title
     string title
 
+    # If true, the conversation is pinned in the sidebar (the default is false)
+    optional bool pinned
+
     # The scheduled task's identifier, for conversations holding a task's run report
     optional string taskId
 
@@ -1181,6 +1184,23 @@ action setConversationModel
     output
         # The conversation's model ID
         string model
+
+    errors
+        ConversationBusy
+        UnknownConversationID
+
+
+# Pin or unpin a conversation in the sidebar
+action setConversationPinned
+    urls
+        POST
+
+    input
+        # The conversation identifier
+        string id
+
+        # True to pin the conversation, false to unpin it
+        bool pinned
 
     errors
         ConversationBusy

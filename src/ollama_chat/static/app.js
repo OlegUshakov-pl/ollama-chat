@@ -9,6 +9,7 @@ const STRINGS = {
     navNewChat: 'New chat',
     chatsHeading: 'Chats',
     tasksHeading: 'Tasks',
+    pinnedHeading: 'Pinned',
     greeting: 'How can I help you today?',
     composerPlaceholder: 'Send a message',
     errorBannerPrefix: 'Error: ',
@@ -25,6 +26,8 @@ const STRINGS = {
     loading: 'Loading…',
     chatMenu: 'Chat actions',
     menuRename: 'Rename',
+    menuPin: 'Pin',
+    menuUnpin: 'Unpin',
     menuDownload: 'Download .md',
     menuDelete: 'Delete',
     renameTitle: 'Rename chat',
@@ -240,6 +243,7 @@ const ICONS = {
     edit: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
     close: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
     memory: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5a3 3 0 0 0-5.7-1.3A3 3 0 0 0 3.5 8 3 3 0 0 0 4 14a3 3 0 0 0 3 4.8A3 3 0 0 0 12 20V5Z"/><path d="M12 5a3 3 0 0 1 5.7-1.3A3 3 0 0 1 20.5 8a3 3 0 0 1-.5 6 3 3 0 0 1-3 4.8A3 3 0 0 1 12 20"/></svg>',
+    pin: '<svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"/><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6z"/></svg>',
 };
 
 /** The tool-call round limit options the composer's tool-rounds button cycles through. */
@@ -297,6 +301,7 @@ const state = {
     sidebarSnapshot: null,
     error: null,
     openMenuId: null,
+    contextMenu: null,
     modal: null,
     sidebarCollapsed: false,
     current: null,
@@ -1408,7 +1413,7 @@ function patchMessages() {
 
 /** Re-render only the sidebar list (skipped while a chat menu is open). */
 function patchSidebarList() {
-    if (state.openMenuId) {
+    if (state.openMenuId || state.contextMenu) {
         return;
     }
     const list = document.getElementById('chat-list');
@@ -2552,9 +2557,17 @@ function buildMemoryHtml() {
 }
 
 function buildSidebarListHtml() {
-    const taskRuns = state.conversations.filter((conv) => conv.taskId);
-    const chats = state.conversations.filter((conv) => !conv.taskId);
-    let html = `<p class="chat-list-title">${escapeHtml(STRINGS.tasksHeading)}</p>`;
+    // Pinned chats live in their own section above Tasks and are not repeated in Chats.
+    const pinned = state.conversations.filter((conv) => conv.pinned);
+    const pinnedIds = new Set(pinned.map((conv) => conv.id));
+    const taskRuns = state.conversations.filter((conv) => conv.taskId && !pinnedIds.has(conv.id));
+    const chats = state.conversations.filter((conv) => !conv.taskId && !pinnedIds.has(conv.id));
+    let html = '';
+    if (pinned.length) {
+        html += `<p class="chat-list-title">${escapeHtml(STRINGS.pinnedHeading)}</p>`;
+        html += pinned.map(renderChatItem).join('');
+    }
+    html += `<p class="chat-list-title">${escapeHtml(STRINGS.tasksHeading)}</p>`;
     html += taskRuns.length
         ? taskRuns.map(renderChatItem).join('')
         : `<p class="chat-list-title">${escapeHtml(STRINGS.noTaskRuns)}</p>`;
@@ -2568,15 +2581,18 @@ function buildSidebarListHtml() {
 function renderChatItem(conv) {
     const active = state.route.name === 'chat' && state.route.id === conv.id ? ' active' : '';
     const menuOpen = state.openMenuId === conv.id ? ' menu-open' : '';
+    const pinLabel = conv.pinned ? STRINGS.menuUnpin : STRINGS.menuPin;
     const menu = state.openMenuId === conv.id
         ? `<div class="chat-menu" role="menu">` +
+            `<button type="button" role="menuitem" data-action="pin" data-id="${escapeHtml(conv.id)}">${escapeHtml(pinLabel)}</button>` +
             `<button type="button" role="menuitem" data-action="rename" data-id="${escapeHtml(conv.id)}">${escapeHtml(STRINGS.menuRename)}</button>` +
             `<button type="button" role="menuitem" data-action="download" data-id="${escapeHtml(conv.id)}">${escapeHtml(STRINGS.menuDownload)}</button>` +
             `<button type="button" role="menuitem" class="danger" data-action="delete" data-id="${escapeHtml(conv.id)}">${escapeHtml(STRINGS.menuDelete)}</button>` +
             `</div>`
         : '';
-    return `<div class="chat-item${active}${menuOpen}">` +
+    return `<div class="chat-item${active}${menuOpen}" data-id="${escapeHtml(conv.id)}">` +
         `<a class="chat-link" href="#/c/${escapeHtml(conv.id)}" title="${escapeHtml(conv.title || conv.id)}">` +
+        (conv.pinned ? `<span class="chat-pin" title="${escapeHtml(STRINGS.pinnedHeading)}">${ICONS.pin}</span>` : '') +
         (conv.taskId ? `${ICONS.checklist} ` : '') +
         `${escapeHtml(conv.title || conv.id)}</a>` +
         (conv.generating ? `<span class="gen-dot" title="${escapeHtml(STRINGS.generating)}" aria-label="${escapeHtml(STRINGS.generating)}"></span>` : '') +
@@ -2584,6 +2600,37 @@ function renderChatItem(conv) {
         `title="${escapeHtml(STRINGS.chatMenu)}" aria-label="${escapeHtml(STRINGS.chatMenu)}" aria-haspopup="menu" aria-expanded="${state.openMenuId === conv.id}">${ICONS.dots}</button>` +
         menu +
         `</div>`;
+}
+
+/** The right-click menu, positioned at the cursor and kept inside the viewport. */
+function buildContextMenuHtml() {
+    const ctx = state.contextMenu;
+    if (!ctx) {
+        return '';
+    }
+    const conv = state.conversations.find((item) => item.id === ctx.id);
+    const pinLabel = conv && conv.pinned ? STRINGS.menuUnpin : STRINGS.menuPin;
+    return `<div class="chat-menu context-menu" id="context-menu" role="menu" data-id="${escapeHtml(ctx.id)}" ` +
+        `style="left:${ctx.x}px;top:${ctx.y}px">` +
+        `<button type="button" role="menuitem" data-action="pin" data-id="${escapeHtml(ctx.id)}">${escapeHtml(pinLabel)}</button>` +
+        `<button type="button" role="menuitem" data-action="rename" data-id="${escapeHtml(ctx.id)}">${escapeHtml(STRINGS.menuRename)}</button>` +
+        `<button type="button" role="menuitem" data-action="download" data-id="${escapeHtml(ctx.id)}">${escapeHtml(STRINGS.menuDownload)}</button>` +
+        `<button type="button" role="menuitem" class="danger" data-action="delete" data-id="${escapeHtml(ctx.id)}">${escapeHtml(STRINGS.menuDelete)}</button>` +
+        `</div>`;
+}
+
+/** Clamp the context menu to the window after it has been rendered and measured. */
+function positionContextMenu() {
+    const menu = document.getElementById('context-menu');
+    if (!menu || !state.contextMenu) {
+        return;
+    }
+    const pad = 8;
+    const rect = menu.getBoundingClientRect();
+    const x = Math.max(pad, Math.min(state.contextMenu.x, window.innerWidth - rect.width - pad));
+    const y = Math.max(pad, Math.min(state.contextMenu.y, window.innerHeight - rect.height - pad));
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
 }
 
 function buildChatHeaderHtml() {
@@ -2730,11 +2777,13 @@ function render() {
         main +
         `</main>` +
         `</div>` +
-        (state.openMenuId || state.modelMenuOpen ? `<div class="overlay" id="menu-overlay"></div>` : '') +
+        (state.openMenuId || state.modelMenuOpen || state.contextMenu ? `<div class="overlay" id="menu-overlay"></div>` : '') +
+        buildContextMenuHtml() +
         renderModal() +
         renderModalTask() +
         `<input type="file" id="md-file-input" accept=".md,.markdown,text/markdown" style="display:none">`;
 
+    positionContextMenu();
     autoresizeComposer();
     enhanceCodeBlocks(document.getElementById('messages'));
     scrollMessagesToBottom();
@@ -3016,6 +3065,23 @@ async function handleMenuAction(action, id) {
     }
 }
 
+/** Pin or unpin a chat. Wait for the server first, then refresh the sidebar from its answer. */
+async function toggleConversationPinned(id) {
+    const conv = state.conversations.find((item) => item.id === id);
+    const pinned = !(conv && conv.pinned);
+    try {
+        await apiPost('setConversationPinned', { id, pinned });
+        state.openMenuId = null;
+        state.contextMenu = null;
+        await refreshConversations();
+    } catch (err) {
+        state.error = `${STRINGS.errorBannerPrefix}${err.message}`;
+        state.openMenuId = null;
+        state.contextMenu = null;
+        render();
+    }
+}
+
 async function submitRename() {
     const input = document.getElementById('modal-input');
     const title = input ? input.value.trim() : '';
@@ -3108,6 +3174,7 @@ function onHashChange() {
     closeImageLightbox();
     state.route = parseRoute();
     state.openMenuId = null;
+    state.contextMenu = null;
     state.modal = null;
     state.modelMenuOpen = false;
     state.mdViewer = null;
@@ -3143,6 +3210,8 @@ function onRootClick(event) {
             event.stopPropagation();
             state.openMenuId = state.openMenuId === id ? null : id;
             render();
+        } else if (action === 'pin') {
+            toggleConversationPinned(id);
         } else if (action === 'rename' || action === 'delete' || action === 'download' || action === 'model') {
             handleMenuAction(action, id);
         } else if (action === 'modal-cancel') {
@@ -3328,6 +3397,7 @@ function onRootClick(event) {
     if (event.target.id === 'menu-overlay') {
         state.openMenuId = null;
         state.modelMenuOpen = false;
+        state.contextMenu = null;
         render();
         return;
     }
@@ -3362,6 +3432,31 @@ function onRootClick(event) {
         } else if (button.id === 'btn-md') {
             document.getElementById('md-file-input')?.click();
         }
+    }
+}
+
+/** Right-click a chat in the sidebar: show a menu at the cursor with Pin / Unpin and actions. */
+function onRootContextMenu(event) {
+    const item = event.target.closest ? event.target.closest('.chat-item') : null;
+    if (!item || !item.dataset.id) {
+        if (state.contextMenu) {
+            state.contextMenu = null;
+            render();
+        }
+        return; // Keep the browser menu everywhere else
+    }
+    event.preventDefault();
+    state.openMenuId = null;
+    state.contextMenu = { id: item.dataset.id, x: event.clientX, y: event.clientY };
+    render();
+}
+
+/** Any scroll dismisses the context menu (and the inline chat menu). */
+function onScrollCloseMenu() {
+    if (state.contextMenu || state.openMenuId) {
+        state.contextMenu = null;
+        state.openMenuId = null;
+        render();
     }
 }
 
@@ -3453,9 +3548,10 @@ function onKeyDown(event) {
         } else if (state.mdViewer) {
             state.mdViewer = null;
             render();
-        } else if (state.openMenuId || state.modelMenuOpen) {
+        } else if (state.openMenuId || state.modelMenuOpen || state.contextMenu) {
             state.openMenuId = null;
             state.modelMenuOpen = false;
+            state.contextMenu = null;
             render();
         }
     }
@@ -3471,7 +3567,10 @@ async function init() {
     }
     window.addEventListener('hashchange', onHashChange);
     window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('scroll', onScrollCloseMenu, true);
+    window.addEventListener('resize', positionContextMenu);
     root.addEventListener('click', onRootClick);
+    root.addEventListener('contextmenu', onRootContextMenu);
     root.addEventListener('keydown', onRootKeyDown);
     root.addEventListener('input', onRootInput);
     root.addEventListener('focusin', onRootFocus);
